@@ -32,6 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--unregister-login-item") {
+            if #available(macOS 13.0, *) { try? SMAppService.mainApp.unregister() }
+            NSApp.terminate(nil)
+            return
+        }
         createStatusItem()
         createComposerWindow()
         configureMessenger()
