@@ -82,4 +82,4 @@ curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/do
 构建产物位于 `build/`：
 
 - `全屏消息.app`
-- `全屏消息-Apple芯片-v3.5.4.pkg`
+- `全屏消息-Apple芯片-v3.5.5.pkg`
