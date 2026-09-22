@@ -6,8 +6,12 @@ private final class PrivacyChatView: NSView {
     private var tracking: NSTrackingArea?
     private(set) var mouseInside = false
     var keyboardActive = false {
-        didSet { updatePrivacy() }
+        didSet {
+            updatePrivacy()
+            if keyboardActive { onInteraction?() }
+        }
     }
+    var onInteraction: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -40,6 +44,7 @@ private final class PrivacyChatView: NSView {
     override func mouseEntered(with event: NSEvent) {
         mouseInside = true
         updatePrivacy()
+        onInteraction?()
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -58,6 +63,35 @@ private final class PrivacyChatView: NSView {
 
     private func updatePrivacy() {
         shield.isHidden = mouseInside || keyboardActive
+    }
+}
+
+private final class UnreadDotView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.systemRed.cgColor
+        layer?.cornerRadius = 5
+        isHidden = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func startBlinking() {
+        isHidden = false
+        guard layer?.animation(forKey: "unreadBlink") == nil else { return }
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = 1.0
+        animation.toValue = 0.18
+        animation.duration = 0.65
+        animation.autoreverses = true
+        animation.repeatCount = .infinity
+        layer?.add(animation, forKey: "unreadBlink")
+    }
+
+    func clear() {
+        layer?.removeAnimation(forKey: "unreadBlink")
+        isHidden = true
     }
 }
 
@@ -91,6 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let chatInputField = NSTextField()
     private let chatSendButton = NSButton(title: "发送聊天", target: nil, action: nil)
     private let chatPrivacyView = PrivacyChatView()
+    private let chatUnreadDot = UnreadDotView()
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
 
     private var customMessages: [String] {
@@ -306,6 +341,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         restartCommandField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         copyRestartButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
         let chatLabel = label("临时聊天")
+        let chatHeader = NSStackView(views: [chatLabel, chatUnreadDot])
+        chatHeader.orientation = .horizontal
+        chatHeader.alignment = .centerY
+        chatHeader.spacing = 8
+        chatUnreadDot.translatesAutoresizingMaskIntoConstraints = false
+        chatUnreadDot.widthAnchor.constraint(equalToConstant: 10).isActive = true
+        chatUnreadDot.heightAnchor.constraint(equalToConstant: 10).isActive = true
+        chatPrivacyView.onInteraction = { [weak self] in self?.chatUnreadDot.clear() }
         let chatInputRow = NSStackView(views: [chatInputField, chatSendButton])
         chatInputRow.orientation = .horizontal
         chatInputRow.spacing = 10
@@ -326,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             chatInputRow.heightAnchor.constraint(equalToConstant: 36)
         ])
         chatPrivacyView.keepShieldOnTop()
-        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, chatLabel, chatPrivacyView, settingsLabel, settingsRow, restartLabel, restartRow, statusLabel])
+        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, chatHeader, chatPrivacyView, settingsLabel, settingsRow, restartLabel, restartRow, statusLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 13
@@ -334,7 +377,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.setCustomSpacing(22, after: subtitle)
         stack.setCustomSpacing(5, after: messageLabel)
         stack.setCustomSpacing(20, after: buttonRow)
-        stack.setCustomSpacing(5, after: chatLabel)
+        stack.setCustomSpacing(5, after: chatHeader)
         stack.setCustomSpacing(20, after: chatPrivacyView)
         stack.setCustomSpacing(5, after: settingsLabel)
         stack.setCustomSpacing(15, after: settingsRow)
@@ -503,10 +546,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     private func showIncomingChat(_ message: WireMessage) {
         appendChatLine(sender: message.sender, text: message.text, incoming: true)
-        setStatus("收到 \(message.sender) 的聊天消息", success: true)
-        NSSound(named: "Glass")?.play()
-        showHome()
-        window.makeFirstResponder(chatInputField)
+        setStatus("收到 \(message.sender) 的聊天消息")
+        chatUnreadDot.startBlinking()
     }
 
     private func appendChatLine(sender: String, text: String, incoming: Bool) {
