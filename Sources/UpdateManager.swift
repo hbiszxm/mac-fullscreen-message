@@ -16,6 +16,7 @@ enum UpdateError: LocalizedError {
     case httpStatus(Int)
     case packageNotFound
     case downloadFailed
+    case installationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +24,7 @@ enum UpdateError: LocalizedError {
         case .httpStatus(let code): return "GitHub 连接失败（HTTP \(code)），请稍后重试。"
         case .packageNotFound: return "最新版中没有找到 Apple 芯片安装包。"
         case .downloadFailed: return "安装包下载失败，请检查网络后重试。"
+        case .installationFailed(let detail): return "自动安装失败：\(detail)"
         }
     }
 }
@@ -119,6 +121,38 @@ enum UpdateManager {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }
         }.resume()
+    }
+
+    static func installSilently(packageURL: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        let shellPath = packageURL.path.replacingOccurrences(of: "'", with: "'\\''")
+        let command = "/usr/sbin/installer -pkg '\(shellPath)' -target /"
+        let appleScriptCommand = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let process = Process()
+        let errorPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", "do shell script \"\(appleScriptCommand)\" with administrator privileges"]
+        process.standardError = errorPipe
+        process.terminationHandler = { process in
+            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let detail = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                if process.terminationStatus == 0 {
+                    completion(.success(()))
+                } else {
+                    completion(.failure(UpdateError.installationFailed(
+                        detail?.isEmpty == false ? detail! : "管理员授权已取消或安装程序返回错误。"
+                    )))
+                }
+            }
+        }
+        do {
+            try process.run()
+        } catch {
+            DispatchQueue.main.async { completion(.failure(error)) }
+        }
     }
 
     private static var currentVersion: String {

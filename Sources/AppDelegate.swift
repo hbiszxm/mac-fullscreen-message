@@ -409,16 +409,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     guard let self else { return }
                     switch downloadResult {
                     case .success(let packageURL):
-                        self.setStatus("V\(release.version) 下载完成", success: true)
-                        let alert = NSAlert()
-                        alert.messageText = "发现新版本 V\(release.version)"
-                        alert.informativeText = "安装包已经下载完成。打开安装器后，按提示覆盖安装即可。"
-                        alert.alertStyle = .informational
-                        alert.addButton(withTitle: "安装更新")
-                        alert.addButton(withTitle: "稍后")
-                        NSApp.activate(ignoringOtherApps: true)
-                        if alert.runModal() == .alertFirstButtonReturn {
-                            NSWorkspace.shared.open(packageURL)
+                        self.setStatus("正在后台安装 V\(release.version)…")
+                        UpdateManager.installSilently(packageURL: packageURL) { [weak self] installResult in
+                            guard let self else { return }
+                            switch installResult {
+                            case .success:
+                                self.setStatus("更新完成，正在重新启动…", success: true)
+                            case .failure(let error):
+                                self.setStatus("自动更新失败", success: false)
+                                self.showUpdateAlert(title: "自动更新失败", message: error.localizedDescription)
+                            }
                         }
                     case .failure(let error):
                         self.setStatus("更新下载失败", success: false)
