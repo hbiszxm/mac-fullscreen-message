@@ -3,13 +3,17 @@ import Foundation
 let receiver = LANMessenger(displayName: "可靠性测试接收端")
 let sender = LANMessenger(displayName: "可靠性测试发送端")
 var receivedText: String?
+var receivedKind: String?
 var sendResult: Result<Void, Error>?
 var didStartSend = false
 var receiverPeerID: String?
 var peerWasRemoved = false
 var peerCameBack = false
 
-receiver.onMessage = { message in receivedText = message.text }
+receiver.onMessage = { message in
+    receivedText = message.text
+    receivedKind = message.kind
+}
 sender.onPeersChanged = { peers in
     if let receiverPeerID {
         if peers.allSatisfy({ $0.id != receiverPeerID }) { peerWasRemoved = true }
@@ -36,7 +40,22 @@ guard case .success? = sendResult else {
     exit(2)
 }
 
-guard let receiverPeerID else { exit(3) }
+receivedText = nil
+receivedKind = nil
+sendResult = nil
+if let peer = sender.peers.first(where: { $0.id == receiverPeerID }) {
+    sender.send(text: "临时聊天测试", kind: "chat", to: peer.endpoint) { result in sendResult = result }
+}
+let chatDeadline = Date().addingTimeInterval(6)
+while Date() < chatDeadline, (sendResult == nil || receivedText == nil) {
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+}
+guard receivedText == "临时聊天测试", receivedKind == "chat", case .success? = sendResult else {
+    fputs("临时聊天发送或类型识别失败\n", stderr)
+    exit(3)
+}
+
+guard let receiverPeerID else { exit(6) }
 sender.dismissPeer(id: receiverPeerID)
 let removeDeadline = Date().addingTimeInterval(2)
 while Date() < removeDeadline, !peerWasRemoved {
@@ -60,4 +79,4 @@ guard peerCameBack else {
     fputs("接收端重启后未重新上线\n", stderr)
     exit(5)
 }
-print("自动发现、发送、确认、移除和重启重新上线均成功")
+print("自动发现、全屏消息、临时聊天、确认、移除和重启重新上线均成功")

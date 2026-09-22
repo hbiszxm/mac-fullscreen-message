@@ -6,6 +6,7 @@ struct WireMessage: Codable {
     let sender: String
     let text: String
     let sentAt: Date
+    let kind: String?
 }
 
 struct Peer: Hashable {
@@ -136,8 +137,8 @@ final class LANMessenger {
         }
     }
 
-    func send(text: String, to endpoint: NWEndpoint, completion: @escaping (Result<Void, Error>) -> Void) {
-        let message = WireMessage(id: UUID(), sender: displayName, text: text, sentAt: Date())
+    func send(text: String, kind: String = "alert", to endpoint: NWEndpoint, completion: @escaping (Result<Void, Error>) -> Void) {
+        let message = WireMessage(id: UUID(), sender: displayName, text: text, sentAt: Date(), kind: kind)
         guard let body = try? JSONEncoder().encode(message) else {
             completion(.failure(MessageError.encodeFailed)); return
         }

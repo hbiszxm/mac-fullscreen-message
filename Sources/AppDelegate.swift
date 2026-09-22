@@ -27,6 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let homeLoginCheckbox = NSButton(checkboxWithTitle: "开机自动运行", target: nil, action: nil)
     private let restartCommandField = NSTextField(string: "pkill -x FullscreenMessage; open \"/Applications/全屏消息.app\"")
     private let copyRestartButton = NSButton(title: "复制命令", target: nil, action: nil)
+    private let chatHistoryView = NSTextView()
+    private let chatInputField = NSTextField()
+    private let chatSendButton = NSButton(title: "发送聊天", target: nil, action: nil)
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
 
     private var customMessages: [String] {
@@ -145,12 +148,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     private func createComposerWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 900),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "全屏消息"
         window.center()
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 580, height: 680)
+        window.contentMinSize = NSSize(width: 660, height: 820)
         let root = NSView()
         window.contentView = root
 
@@ -172,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
         scroll.documentView = messageView
-        scroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
+        scroll.heightAnchor.constraint(equalToConstant: 145).isActive = true
         sendButton.target = self
         sendButton.action = #selector(sendCustomMessage)
         sendButton.bezelStyle = .rounded
@@ -199,6 +202,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         copyRestartButton.target = self
         copyRestartButton.action = #selector(copyRestartCommand)
         copyRestartButton.bezelStyle = .rounded
+        chatHistoryView.isEditable = false
+        chatHistoryView.isSelectable = true
+        chatHistoryView.font = .systemFont(ofSize: 14)
+        chatHistoryView.textContainerInset = NSSize(width: 10, height: 9)
+        chatHistoryView.string = "临时聊天记录将在这里显示。\n"
+        let chatScroll = NSScrollView()
+        chatScroll.hasVerticalScroller = true
+        chatScroll.borderType = .bezelBorder
+        chatScroll.documentView = chatHistoryView
+        chatScroll.heightAnchor.constraint(equalToConstant: 125).isActive = true
+        chatInputField.placeholderString = "输入聊天内容，按回车发送"
+        chatInputField.target = self
+        chatInputField.action = #selector(sendChatMessage)
+        chatSendButton.target = self
+        chatSendButton.action = #selector(sendChatMessage)
+        chatSendButton.bezelStyle = .rounded
+        chatSendButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
+        chatSendButton.isEnabled = false
         statusLabel.textColor = .secondaryLabelColor
 
         let grid = NSGridView(views: [[label("本机名称"), nameField], [label("接收电脑"), peerPopup]])
@@ -222,7 +243,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         restartRow.spacing = 10
         restartCommandField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         copyRestartButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
-        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, settingsLabel, settingsRow, restartLabel, restartRow, statusLabel])
+        let chatLabel = label("临时聊天")
+        let chatInputRow = NSStackView(views: [chatInputField, chatSendButton])
+        chatInputRow.orientation = .horizontal
+        chatInputRow.spacing = 10
+        chatInputField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, chatLabel, chatScroll, chatInputRow, settingsLabel, settingsRow, restartLabel, restartRow, statusLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 13
@@ -230,6 +256,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.setCustomSpacing(22, after: subtitle)
         stack.setCustomSpacing(5, after: messageLabel)
         stack.setCustomSpacing(20, after: buttonRow)
+        stack.setCustomSpacing(5, after: chatLabel)
+        stack.setCustomSpacing(8, after: chatScroll)
+        stack.setCustomSpacing(20, after: chatInputRow)
         stack.setCustomSpacing(5, after: settingsLabel)
         stack.setCustomSpacing(15, after: settingsRow)
         stack.setCustomSpacing(5, after: restartLabel)
@@ -240,6 +269,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            chatScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            chatInputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            chatInputRow.heightAnchor.constraint(equalToConstant: 36),
             settingsRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             settingsRow.heightAnchor.constraint(equalToConstant: 42),
             restartRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -256,7 +288,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private func configureMessenger() {
         messenger = LANMessenger(displayName: nameField.stringValue)
         messenger.onPeersChanged = { [weak self] peers in self?.updatePeers(peers) }
-        messenger.onMessage = { [weak self] message in self?.showIncoming(message) }
+        messenger.onMessage = { [weak self] message in
+            if message.kind == "chat" { self?.showIncomingChat(message) }
+            else { self?.showIncoming(message) }
+        }
         messenger.onStatus = { [weak self] text in self?.setStatus(text) }
         messenger.start()
     }
@@ -276,11 +311,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             peerPopup.addItem(withTitle: "暂未发现其他电脑")
             peerPopup.isEnabled = false
             sendButton.isEnabled = false
+            chatSendButton.isEnabled = false
         } else {
             peerPopup.addItem(withTitle: "所有电脑（\(peers.count) 台）")
             peers.forEach { peerPopup.addItem(withTitle: $0.name) }
             peerPopup.isEnabled = true
             sendButton.isEnabled = true
+            chatSendButton.isEnabled = true
         }
         rebuildStatusMenu()
     }
@@ -336,6 +373,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         customMessages = messages
         rebuildStatusMenu()
         setStatus("已添加到快捷列表", success: true)
+    }
+
+    @objc private func sendChatMessage() {
+        let text = chatInputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let index = peerPopup.indexOfSelectedItem
+        guard !text.isEmpty, !peers.isEmpty, index >= 0 else { NSSound.beep(); return }
+        let targets: [Peer]
+        if index == 0 {
+            targets = peers
+        } else {
+            let peerIndex = index - 1
+            guard peers.indices.contains(peerIndex) else { NSSound.beep(); return }
+            targets = [peers[peerIndex]]
+        }
+        chatSendButton.isEnabled = false
+        var remaining = targets.count
+        var failures = 0
+        for peer in targets {
+            messenger.send(text: text, kind: "chat", to: peer.endpoint) { [weak self] result in
+                guard let self else { return }
+                if case .failure = result { failures += 1 }
+                remaining -= 1
+                guard remaining == 0 else { return }
+                self.chatSendButton.isEnabled = !self.peers.isEmpty
+                let targetNames = targets.map(\.name).joined(separator: "、")
+                if failures == 0 {
+                    self.appendChatLine(sender: "我 → \(targetNames)", text: text, incoming: false)
+                    self.chatInputField.stringValue = ""
+                    self.setStatus("聊天消息已送达", success: true)
+                    self.showSendToast(message: text, recipients: targetNames, failures: 0)
+                } else {
+                    self.setStatus("聊天发送失败：\(failures) 台未确认", success: false)
+                    self.showSendToast(message: text, recipients: targetNames, failures: failures)
+                }
+            }
+        }
+    }
+
+    private func showIncomingChat(_ message: WireMessage) {
+        appendChatLine(sender: message.sender, text: message.text, incoming: true)
+        setStatus("收到 \(message.sender) 的聊天消息", success: true)
+        NSSound(named: "Glass")?.play()
+        showHome()
+        window.makeFirstResponder(chatInputField)
+    }
+
+    private func appendChatLine(sender: String, text: String, incoming: Bool) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let header = "[\(formatter.string(from: Date()))] \(sender)\n"
+        let entry = NSMutableAttributedString(string: header, attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: incoming ? NSColor.systemBlue : NSColor.systemGreen
+        ])
+        entry.append(NSAttributedString(string: "\(text)\n\n", attributes: [
+            .font: NSFont.systemFont(ofSize: 14),
+            .foregroundColor: NSColor.labelColor
+        ]))
+        chatHistoryView.textStorage?.append(entry)
+        chatHistoryView.scrollToEndOfDocument(nil)
     }
 
     @objc private func deleteCustomMessage(_ sender: NSMenuItem) {
