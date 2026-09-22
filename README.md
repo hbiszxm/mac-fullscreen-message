@@ -7,7 +7,7 @@
 在终端执行：
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/hbiszxm/mac-fullscreen-message/main/scripts/install-latest.sh)"
+/bin/bash -c "$(curl -fsSL https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh)"
 ```
 
 以后升级仍然执行同一条命令，脚本会下载 GitHub Releases 中的最新版并覆盖安装。
