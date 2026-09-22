@@ -245,6 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             peerPopup.isEnabled = false
             sendButton.isEnabled = false
         } else {
+            peerPopup.addItem(withTitle: "所有电脑（\(peers.count) 台）")
             peers.forEach { peerPopup.addItem(withTitle: $0.name) }
             peerPopup.isEnabled = true
             sendButton.isEnabled = true
@@ -278,8 +279,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc private func sendCustomMessage() {
         let text = messageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let index = peerPopup.indexOfSelectedItem
-        guard !text.isEmpty, peers.indices.contains(index) else { NSSound.beep(); return }
-        send(text, to: [peers[index]])
+        guard !text.isEmpty, !peers.isEmpty, index >= 0 else { NSSound.beep(); return }
+        if index == 0 {
+            send(text, to: peers)
+        } else {
+            let peerIndex = index - 1
+            guard peers.indices.contains(peerIndex) else { NSSound.beep(); return }
+            send(text, to: [peers[peerIndex]])
+        }
     }
 
     @objc private func saveCustomMessage() {

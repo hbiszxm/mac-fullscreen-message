@@ -37,6 +37,7 @@ curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/do
 
 - 本机名称和在线电脑
 - 自定义消息发送
+- 接收电脑可选择单台或所有在线电脑
 - 添加快捷消息
 - 开机自动运行
 - 检查在线更新
@@ -81,4 +82,4 @@ curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/do
 构建产物位于 `build/`：
 
 - `全屏消息.app`
-- `全屏消息-Apple芯片-v3.5.2.pkg`
+- `全屏消息-Apple芯片-v3.5.3.pkg`
