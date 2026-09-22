@@ -45,7 +45,8 @@ enum UpdateManager {
                 let version = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
                 let asset = assets.first { item in
                     guard let name = item["name"] as? String else { return false }
-                    return name.hasPrefix("FullscreenMessage-AppleSilicon-") && name.hasSuffix(".pkg")
+                    return name == "FullscreenMessage-AppleSilicon.pkg" ||
+                        (name.hasPrefix("FullscreenMessage-AppleSilicon-") && name.hasSuffix(".pkg"))
                 }
                 if isNewer(version, than: currentVersion) {
                     if let value = asset?["browser_download_url"] as? String, let url = URL(string: value) {
