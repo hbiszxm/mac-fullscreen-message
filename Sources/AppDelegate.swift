@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var messenger: LANMessenger!
     private var peers: [Peer] = []
     private var alerts: [FullScreenAlertController] = []
+    private var sendToast: NSPanel?
     private var lastStatus = "正在启动…"
     private var activity: NSObjectProtocol?
     private let nameField = NSTextField()
@@ -282,6 +283,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 remaining -= 1
                 guard remaining == 0, let self else { return }
                 self.setStatus(failures == 0 ? "对方已确认收到" : "发送失败：\(failures) 台未确认", success: failures == 0)
+                let targetNames = targets.map(\.name).joined(separator: "、")
+                self.showSendToast(message: text, recipients: targetNames, failures: failures)
                 if failures == 0 { self.messageView.string = "" }
                 if failures > 0 { NSSound.beep() }
             }
@@ -411,6 +414,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         alert.addButton(withTitle: "确定")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    private func showSendToast(message: String, recipients: String, failures: Int) {
+        sendToast?.orderOut(nil)
+
+        let size = NSSize(width: 390, height: 168)
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let finalOrigin = NSPoint(x: visible.maxX - size.width - 24, y: visible.maxY - size.height - 24)
+        let panel = NSPanel(contentRect: NSRect(origin: NSPoint(x: finalOrigin.x + 24, y: finalOrigin.y), size: size),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.ignoresMouseEvents = true
+
+        let card = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        card.material = .hudWindow
+        card.blendingMode = .behindWindow
+        card.state = .active
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 18
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        panel.contentView = card
+
+        let icon = NSTextField(labelWithString: failures == 0 ? "✓" : "!")
+        icon.font = .systemFont(ofSize: 26, weight: .bold)
+        let accentColor: NSColor = failures == 0 ? .systemGreen : .systemOrange
+        icon.textColor = accentColor
+        icon.alignment = .center
+        icon.wantsLayer = true
+        icon.layer?.backgroundColor = accentColor.withAlphaComponent(0.16).cgColor
+        icon.layer?.cornerRadius = 19
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: failures == 0 ? "消息发送成功" : "消息发送未完成")
+        title.font = .systemFont(ofSize: 18, weight: .bold)
+        title.textColor = .labelColor
+
+        let recipient = NSTextField(wrappingLabelWithString: failures == 0 ? "已发送给：\(recipients)" : "\(failures) 台电脑未确认收到")
+        recipient.font = .systemFont(ofSize: 13, weight: .medium)
+        recipient.textColor = .secondaryLabelColor
+        recipient.maximumNumberOfLines = 2
+
+        let previewText = message.count > 42 ? String(message.prefix(42)) + "…" : message
+        let preview = NSTextField(wrappingLabelWithString: previewText)
+        preview.font = .systemFont(ofSize: 15)
+        preview.textColor = .labelColor
+        preview.maximumNumberOfLines = 2
+
+        let textStack = NSStackView(views: [title, recipient, preview])
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 7
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(icon)
+        card.addSubview(textStack)
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),
+            icon.topAnchor.constraint(equalTo: card.topAnchor, constant: 21),
+            icon.widthAnchor.constraint(equalToConstant: 38),
+            icon.heightAnchor.constraint(equalToConstant: 38),
+            textStack.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 14),
+            textStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -20),
+            textStack.topAnchor.constraint(equalTo: card.topAnchor, constant: 20),
+            textStack.bottomAnchor.constraint(lessThanOrEqualTo: card.bottomAnchor, constant: -18)
+        ])
+
+        sendToast = panel
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+            panel.animator().setFrameOrigin(finalOrigin)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self, weak panel] in
+            guard let panel, panel === self?.sendToast else { return }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.25
+                panel.animator().alphaValue = 0
+            }, completionHandler: {
+                panel.orderOut(nil)
+                if self?.sendToast === panel { self?.sendToast = nil }
+            })
+        }
     }
 
     private func setStatus(_ text: String, success: Bool? = nil) {
