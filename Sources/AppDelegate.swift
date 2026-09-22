@@ -18,31 +18,12 @@ private final class PrivacyChatView: NSView {
         shield.layer?.cornerRadius = 12
         shield.translatesAutoresizingMaskIntoConstraints = false
 
-        let icon = NSTextField(labelWithString: "◉")
-        icon.font = .systemFont(ofSize: 26, weight: .bold)
-        icon.textColor = .secondaryLabelColor
-        icon.alignment = .center
-        let title = NSTextField(labelWithString: "防窥模式")
-        title.font = .systemFont(ofSize: 17, weight: .bold)
-        title.alignment = .center
-        let hint = NSTextField(labelWithString: "鼠标移入或使用键盘输入时显示聊天内容")
-        hint.font = .systemFont(ofSize: 12)
-        hint.textColor = .secondaryLabelColor
-        hint.alignment = .center
-        let stack = NSStackView(views: [icon, title, hint])
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 6
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        shield.addSubview(stack)
         addSubview(shield)
         NSLayoutConstraint.activate([
             shield.leadingAnchor.constraint(equalTo: leadingAnchor),
             shield.trailingAnchor.constraint(equalTo: trailingAnchor),
             shield.topAnchor.constraint(equalTo: topAnchor),
-            shield.bottomAnchor.constraint(equalTo: bottomAnchor),
-            stack.centerXAnchor.constraint(equalTo: shield.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: shield.centerYAnchor)
+            shield.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
