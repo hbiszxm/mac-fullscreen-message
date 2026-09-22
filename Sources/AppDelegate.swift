@@ -1,6 +1,85 @@
 import AppKit
 import ServiceManagement
 
+private final class PrivacyChatView: NSView {
+    private let shield = NSVisualEffectView()
+    private var tracking: NSTrackingArea?
+    private(set) var mouseInside = false
+    var keyboardActive = false {
+        didSet { updatePrivacy() }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        shield.material = .hudWindow
+        shield.blendingMode = .withinWindow
+        shield.state = .active
+        shield.wantsLayer = true
+        shield.layer?.cornerRadius = 12
+        shield.translatesAutoresizingMaskIntoConstraints = false
+
+        let icon = NSTextField(labelWithString: "◉")
+        icon.font = .systemFont(ofSize: 26, weight: .bold)
+        icon.textColor = .secondaryLabelColor
+        icon.alignment = .center
+        let title = NSTextField(labelWithString: "防窥模式")
+        title.font = .systemFont(ofSize: 17, weight: .bold)
+        title.alignment = .center
+        let hint = NSTextField(labelWithString: "鼠标移入或使用键盘输入时显示聊天内容")
+        hint.font = .systemFont(ofSize: 12)
+        hint.textColor = .secondaryLabelColor
+        hint.alignment = .center
+        let stack = NSStackView(views: [icon, title, hint])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        shield.addSubview(stack)
+        addSubview(shield)
+        NSLayoutConstraint.activate([
+            shield.leadingAnchor.constraint(equalTo: leadingAnchor),
+            shield.trailingAnchor.constraint(equalTo: trailingAnchor),
+            shield.topAnchor.constraint(equalTo: topAnchor),
+            shield.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.centerXAnchor.constraint(equalTo: shield.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: shield.centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let next = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(next)
+        tracking = next
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        mouseInside = true
+        updatePrivacy()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        mouseInside = false
+        updatePrivacy()
+    }
+
+    func conceal() {
+        keyboardActive = false
+        shield.isHidden = false
+    }
+
+    func keepShieldOnTop() {
+        addSubview(shield, positioned: .above, relativeTo: nil)
+    }
+
+    private func updatePrivacy() {
+        shield.isHidden = mouseInside || keyboardActive
+    }
+}
+
 private final class SendChoice: NSObject {
     let text: String
     let peerID: String?
@@ -30,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let chatHistoryView = NSTextView()
     private let chatInputField = NSTextField()
     private let chatSendButton = NSButton(title: "发送聊天", target: nil, action: nil)
+    private let chatPrivacyView = PrivacyChatView()
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
 
     private var customMessages: [String] {
@@ -215,6 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         chatInputField.placeholderString = "输入聊天内容，按回车发送"
         chatInputField.target = self
         chatInputField.action = #selector(sendChatMessage)
+        chatInputField.delegate = self
         chatSendButton.target = self
         chatSendButton.action = #selector(sendChatMessage)
         chatSendButton.bezelStyle = .rounded
@@ -248,7 +329,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         chatInputRow.orientation = .horizontal
         chatInputRow.spacing = 10
         chatInputField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, chatLabel, chatScroll, chatInputRow, settingsLabel, settingsRow, restartLabel, restartRow, statusLabel])
+        chatPrivacyView.translatesAutoresizingMaskIntoConstraints = false
+        chatPrivacyView.addSubview(chatScroll)
+        chatPrivacyView.addSubview(chatInputRow)
+        chatScroll.translatesAutoresizingMaskIntoConstraints = false
+        chatInputRow.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            chatScroll.leadingAnchor.constraint(equalTo: chatPrivacyView.leadingAnchor),
+            chatScroll.trailingAnchor.constraint(equalTo: chatPrivacyView.trailingAnchor),
+            chatScroll.topAnchor.constraint(equalTo: chatPrivacyView.topAnchor),
+            chatInputRow.leadingAnchor.constraint(equalTo: chatPrivacyView.leadingAnchor),
+            chatInputRow.trailingAnchor.constraint(equalTo: chatPrivacyView.trailingAnchor),
+            chatInputRow.topAnchor.constraint(equalTo: chatScroll.bottomAnchor, constant: 8),
+            chatInputRow.bottomAnchor.constraint(equalTo: chatPrivacyView.bottomAnchor),
+            chatInputRow.heightAnchor.constraint(equalToConstant: 36)
+        ])
+        chatPrivacyView.keepShieldOnTop()
+        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, chatLabel, chatPrivacyView, settingsLabel, settingsRow, restartLabel, restartRow, statusLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 13
@@ -257,8 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.setCustomSpacing(5, after: messageLabel)
         stack.setCustomSpacing(20, after: buttonRow)
         stack.setCustomSpacing(5, after: chatLabel)
-        stack.setCustomSpacing(8, after: chatScroll)
-        stack.setCustomSpacing(20, after: chatInputRow)
+        stack.setCustomSpacing(20, after: chatPrivacyView)
         stack.setCustomSpacing(5, after: settingsLabel)
         stack.setCustomSpacing(15, after: settingsRow)
         stack.setCustomSpacing(5, after: restartLabel)
@@ -269,14 +365,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            chatScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            chatInputRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            chatInputRow.heightAnchor.constraint(equalToConstant: 36),
+            chatPrivacyView.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            chatPrivacyView.heightAnchor.constraint(equalToConstant: 169),
             settingsRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             settingsRow.heightAnchor.constraint(equalToConstant: 42),
             restartRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             restartRow.heightAnchor.constraint(equalToConstant: 34)
         ])
+        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+            self?.chatPrivacyView.conceal()
+        }
     }
 
     private func label(_ text: String) -> NSTextField {
@@ -297,11 +395,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+        if field === chatInputField {
+            chatPrivacyView.keyboardActive = false
+            return
+        }
+        guard field === nameField else { return }
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         UserDefaults.standard.set(name, forKey: "displayName")
         messenger.displayName = name
         messenger.start()
+    }
+
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, field === chatInputField else { return }
+        chatPrivacyView.keyboardActive = true
     }
 
     private func updatePeers(_ peers: [Peer]) {
