@@ -99,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             deleteRoot.submenu = deleteMenu
             statusMenu.addItem(deleteRoot)
         }
+        let update = NSMenuItem(title: "检查在线更新…", action: #selector(checkForUpdates), keyEquivalent: "")
+        update.target = self
+        statusMenu.addItem(update)
         let login = NSMenuItem(title: "开机自动运行", action: #selector(toggleLoginItem(_:)), keyEquivalent: "")
         login.target = self
         if #available(macOS 13.0, *) { login.state = SMAppService.mainApp.status == .enabled ? .on : .off }
@@ -298,6 +301,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
+
+    @objc private func checkForUpdates() {
+        setStatus("正在检查更新…")
+        UpdateManager.check { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .upToDate(let version):
+                self.setStatus("当前已是最新版 V\(version)", success: true)
+                self.showUpdateAlert(title: "已经是最新版", message: "当前版本 V\(version)，无需更新。")
+            case .available(let release):
+                self.setStatus("正在下载 V\(release.version)…")
+                UpdateManager.download(release) { [weak self] downloadResult in
+                    guard let self else { return }
+                    switch downloadResult {
+                    case .success(let packageURL):
+                        self.setStatus("V\(release.version) 下载完成", success: true)
+                        let alert = NSAlert()
+                        alert.messageText = "发现新版本 V\(release.version)"
+                        alert.informativeText = "安装包已经下载完成。打开安装器后，按提示覆盖安装即可。"
+                        alert.alertStyle = .informational
+                        alert.addButton(withTitle: "安装更新")
+                        alert.addButton(withTitle: "稍后")
+                        NSApp.activate(ignoringOtherApps: true)
+                        if alert.runModal() == .alertFirstButtonReturn {
+                            NSWorkspace.shared.open(packageURL)
+                        }
+                    case .failure(let error):
+                        self.setStatus("更新下载失败", success: false)
+                        self.showUpdateAlert(title: "下载失败", message: error.localizedDescription)
+                    }
+                }
+            case .failure(let error):
+                self.setStatus("检查更新失败", success: false)
+                self.showUpdateAlert(title: "检查更新失败", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func showUpdateAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "确定")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
 
     private func setStatus(_ text: String, success: Bool? = nil) {
         lastStatus = text
