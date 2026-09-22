@@ -535,10 +535,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     self.appendChatLine(sender: "我 → \(targetNames)", text: text, incoming: false)
                     self.chatInputField.stringValue = ""
                     self.setStatus("聊天消息已送达", success: true)
-                    self.showSendToast(message: text, recipients: targetNames, failures: 0)
                 } else {
                     self.setStatus("聊天发送失败：\(failures) 台未确认", success: false)
-                    self.showSendToast(message: text, recipients: targetNames, failures: failures)
                 }
             }
         }
