@@ -6,7 +6,7 @@ BUILD_DIR="$PROJECT_DIR/build"
 STAGING="$(mktemp -d /private/tmp/fullscreen-message.XXXXXX)"
 APP="$STAGING/全屏消息.app"
 PAYLOAD="$STAGING/payload"
-PKG="$BUILD_DIR/全屏消息-Apple芯片-v3.5.6.pkg"
+PKG="$BUILD_DIR/全屏消息-Apple芯片-v3.5.7.pkg"
 trap 'rm -rf "$STAGING"' EXIT
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$BUILD_DIR/module-cache"
@@ -38,7 +38,7 @@ ditto --norsrc "$APP" "$PAYLOAD/Applications/全屏消息.app"
 pkgbuild --root "$PAYLOAD" \
   --scripts "$PROJECT_DIR/installer" \
   --identifier "cn.local.fullscreen-message" \
-  --version "3.5.6" \
+  --version "3.5.7" \
   --install-location / \
   "$PKG"
 
