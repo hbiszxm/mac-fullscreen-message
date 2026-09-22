@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let saveButton = NSButton(title: "添加到快捷列表", target: nil, action: nil)
     private let homeUpdateButton = NSButton(title: "检查在线更新", target: nil, action: nil)
     private let homeLoginCheckbox = NSButton(checkboxWithTitle: "开机自动运行", target: nil, action: nil)
+    private let restartCommandField = NSTextField(string: "pkill -x FullscreenMessage; open \"/Applications/全屏消息.app\"")
+    private let copyRestartButton = NSButton(title: "复制命令", target: nil, action: nil)
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
 
     private var customMessages: [String] {
@@ -143,12 +145,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     private func createComposerWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 650),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "全屏消息"
         window.center()
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 580, height: 610)
+        window.contentMinSize = NSSize(width: 580, height: 680)
         let root = NSView()
         window.contentView = root
 
@@ -190,6 +192,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         homeUpdateButton.controlSize = .large
         homeLoginCheckbox.target = self
         homeLoginCheckbox.action = #selector(toggleLoginItem(_:))
+        restartCommandField.isEditable = false
+        restartCommandField.isSelectable = true
+        restartCommandField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        restartCommandField.toolTip = "点击后可以选择并复制重启命令"
+        copyRestartButton.target = self
+        copyRestartButton.action = #selector(copyRestartCommand)
+        copyRestartButton.bezelStyle = .rounded
         statusLabel.textColor = .secondaryLabelColor
 
         let grid = NSGridView(views: [[label("本机名称"), nameField], [label("接收电脑"), peerPopup]])
@@ -207,7 +216,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         settingsRow.orientation = .horizontal
         settingsRow.distribution = .fillEqually
         settingsRow.spacing = 12
-        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, settingsLabel, settingsRow, statusLabel])
+        let restartLabel = label("重启命令")
+        let restartRow = NSStackView(views: [restartCommandField, copyRestartButton])
+        restartRow.orientation = .horizontal
+        restartRow.spacing = 10
+        restartCommandField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        copyRestartButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
+        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, settingsLabel, settingsRow, restartLabel, restartRow, statusLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 13
@@ -216,6 +231,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.setCustomSpacing(5, after: messageLabel)
         stack.setCustomSpacing(20, after: buttonRow)
         stack.setCustomSpacing(5, after: settingsLabel)
+        stack.setCustomSpacing(15, after: settingsRow)
+        stack.setCustomSpacing(5, after: restartLabel)
         root.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
@@ -224,7 +241,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             settingsRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            settingsRow.heightAnchor.constraint(equalToConstant: 42)
+            settingsRow.heightAnchor.constraint(equalToConstant: 42),
+            restartRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            restartRow.heightAnchor.constraint(equalToConstant: 34)
         ])
     }
 
@@ -358,6 +377,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             else { try SMAppService.mainApp.register() }
         } catch { setStatus("开机启动设置失败：\(error.localizedDescription)", success: false) }
         rebuildStatusMenu()
+    }
+
+    @objc private func copyRestartCommand() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(restartCommandField.stringValue, forType: .string)
+        setStatus("重启命令已复制", success: true)
     }
 
     private func enableLoginItemOnFirstInstalledLaunch() {
