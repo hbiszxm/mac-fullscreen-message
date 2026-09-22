@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let statusLabel = NSTextField(labelWithString: "正在启动…")
     private let sendButton = NSButton(title: "发送全屏消息", target: nil, action: nil)
     private let saveButton = NSButton(title: "添加到快捷列表", target: nil, action: nil)
+    private let homeUpdateButton = NSButton(title: "检查在线更新", target: nil, action: nil)
+    private let homeLoginCheckbox = NSButton(checkboxWithTitle: "开机自动运行", target: nil, action: nil)
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
 
     private var customMessages: [String] {
@@ -35,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         configureMessenger()
         enableLoginItemOnFirstInstalledLaunch()
         activity = ProcessInfo.processInfo.beginActivity(options: [.automaticTerminationDisabled, .suddenTerminationDisabled], reason: "持续接收局域网消息")
+        if CommandLine.arguments.contains("--show-home") { showHome() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -56,6 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let recent = NSMenuItem(title: "状态：\(lastStatus)", action: nil, keyEquivalent: "")
         recent.isEnabled = false
         statusMenu.addItem(recent)
+        statusMenu.addItem(.separator())
+
+        let home = NSMenuItem(title: "显示首页", action: #selector(showHome), keyEquivalent: "")
+        home.target = self
+        statusMenu.addItem(home)
         statusMenu.addItem(.separator())
 
         for text in defaultMessages + customMessages {
@@ -104,7 +112,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         statusMenu.addItem(update)
         let login = NSMenuItem(title: "开机自动运行", action: #selector(toggleLoginItem(_:)), keyEquivalent: "")
         login.target = self
-        if #available(macOS 13.0, *) { login.state = SMAppService.mainApp.status == .enabled ? .on : .off }
+        if #available(macOS 13.0, *) {
+            let state: NSControl.StateValue = SMAppService.mainApp.status == .enabled ? .on : .off
+            login.state = state
+            homeLoginCheckbox.state = state
+        }
         statusMenu.addItem(login)
         statusMenu.addItem(.separator())
         let quit = NSMenuItem(title: "退出全屏消息", action: #selector(quitApp), keyEquivalent: "q")
@@ -113,18 +125,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     private func createComposerWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 520),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 650),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "发送自定义消息"
+        window.title = "全屏消息"
         window.center()
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 540, height: 480)
+        window.contentMinSize = NSSize(width: 580, height: 610)
         let root = NSView()
         window.contentView = root
 
-        let title = NSTextField(labelWithString: "发送自定义消息")
+        let title = NSTextField(labelWithString: "全屏消息")
         title.font = .systemFont(ofSize: 28, weight: .bold)
-        let subtitle = NSTextField(wrappingLabelWithString: "自动发现同一局域网内运行“全屏消息”的 Mac，无需配对。")
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let subtitle = NSTextField(wrappingLabelWithString: "V\(version) · 自动发现同一局域网内运行“全屏消息”的 Mac，无需配对。")
         subtitle.textColor = .secondaryLabelColor
         nameField.stringValue = UserDefaults.standard.string(forKey: "displayName") ?? Host.current().localizedName ?? "我的 Mac"
         nameField.placeholderString = "本机名称"
@@ -153,6 +166,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         saveButton.controlSize = .large
         saveButton.font = .systemFont(ofSize: 15, weight: .medium)
         saveButton.heightAnchor.constraint(equalToConstant: 46).isActive = true
+        homeUpdateButton.target = self
+        homeUpdateButton.action = #selector(checkForUpdates)
+        homeUpdateButton.bezelStyle = .rounded
+        homeUpdateButton.controlSize = .large
+        homeLoginCheckbox.target = self
+        homeLoginCheckbox.action = #selector(toggleLoginItem(_:))
         statusLabel.textColor = .secondaryLabelColor
 
         let grid = NSGridView(views: [[label("本机名称"), nameField], [label("接收电脑"), peerPopup]])
@@ -165,20 +184,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         buttonRow.orientation = .horizontal
         buttonRow.distribution = .fillEqually
         buttonRow.spacing = 12
-        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, statusLabel])
+        let settingsLabel = label("设置")
+        let settingsRow = NSStackView(views: [homeLoginCheckbox, homeUpdateButton])
+        settingsRow.orientation = .horizontal
+        settingsRow.distribution = .fillEqually
+        settingsRow.spacing = 12
+        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, settingsLabel, settingsRow, statusLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 13
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.setCustomSpacing(22, after: subtitle)
         stack.setCustomSpacing(5, after: messageLabel)
+        stack.setCustomSpacing(20, after: buttonRow)
+        stack.setCustomSpacing(5, after: settingsLabel)
         root.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
             stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            settingsRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            settingsRow.heightAnchor.constraint(equalToConstant: 42)
         ])
     }
 
@@ -280,11 +308,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     @objc private func showComposer() {
+        showHome()
+        window.makeFirstResponder(messageView)
+    }
+
+    @objc private func showHome() {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 
-    @objc private func toggleLoginItem(_ sender: NSMenuItem) {
+    @objc private func toggleLoginItem(_ sender: Any) {
         guard #available(macOS 13.0, *) else { return }
         do {
             if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
