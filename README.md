@@ -17,7 +17,7 @@
 打开“终端”，执行：
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh)"
+curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh?cache=$(date +%s)" | /bin/bash
 ```
 
 根据提示输入当前 Mac 的登录密码。脚本会下载最新版、覆盖旧版本并自动启动。
@@ -51,7 +51,7 @@
 更新和首次安装使用同一条命令：
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh)"
+curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh?cache=$(date +%s)" | /bin/bash
 ```
 
 ## 命令行卸载
@@ -59,7 +59,7 @@
 执行：
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/uninstall.sh)"
+curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/uninstall.sh?cache=$(date +%s)" | /bin/bash
 ```
 
 卸载脚本会清理后台进程、开机启动、应用文件和本地设置。
@@ -81,5 +81,4 @@
 构建产物位于 `build/`：
 
 - `全屏消息.app`
-- `全屏消息-Apple芯片-v3.5.1.pkg`
-
+- `全屏消息-Apple芯片-v3.5.2.pkg`

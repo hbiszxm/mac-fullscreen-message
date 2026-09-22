@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO="hbiszxm/mac-fullscreen-message"
 PKG_NAME="FullscreenMessage-AppleSilicon.pkg"
-DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$PKG_NAME"
+DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$PKG_NAME?cache=$(date +%s)"
 WORK_DIR="$(mktemp -d /private/tmp/fullscreen-message-install.XXXXXX)"
 PKG_PATH="$WORK_DIR/$PKG_NAME"
 trap 'rm -rf "$WORK_DIR"' EXIT
