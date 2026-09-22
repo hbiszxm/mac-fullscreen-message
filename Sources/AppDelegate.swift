@@ -236,7 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
         scroll.documentView = messageView
-        scroll.heightAnchor.constraint(equalToConstant: 145).isActive = true
+        scroll.heightAnchor.constraint(equalToConstant: 82).isActive = true
         sendButton.target = self
         sendButton.action = #selector(sendCustomMessage)
         sendButton.bezelStyle = .rounded
@@ -272,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         chatScroll.hasVerticalScroller = true
         chatScroll.borderType = .bezelBorder
         chatScroll.documentView = chatHistoryView
-        chatScroll.heightAnchor.constraint(equalToConstant: 125).isActive = true
+        chatScroll.heightAnchor.constraint(equalToConstant: 188).isActive = true
         chatInputField.placeholderString = "输入聊天内容，按回车发送"
         chatInputField.target = self
         chatInputField.action = #selector(sendChatMessage)
@@ -347,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             chatPrivacyView.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            chatPrivacyView.heightAnchor.constraint(equalToConstant: 169),
+            chatPrivacyView.heightAnchor.constraint(equalToConstant: 232),
             settingsRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             settingsRow.heightAnchor.constraint(equalToConstant: 42),
             restartRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
