@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="hbiszxm/mac-fullscreen-message"
-PKG_NAME="全屏消息-Apple芯片-v3.2.pkg"
+PKG_NAME="全屏消息-Apple芯片-v3.3.pkg"
 DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$PKG_NAME"
 WORK_DIR="$(mktemp -d /private/tmp/fullscreen-message-install.XXXXXX)"
 PKG_PATH="$WORK_DIR/$PKG_NAME"
@@ -18,4 +18,3 @@ curl --fail --location --progress-bar "$DOWNLOAD_URL" --output "$PKG_PATH"
 echo "正在安装，需要输入当前 Mac 的登录密码…"
 sudo /usr/sbin/installer -pkg "$PKG_PATH" -target /
 echo "安装或升级完成。"
-

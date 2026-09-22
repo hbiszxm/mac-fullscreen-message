@@ -1,8 +1,14 @@
 import AppKit
 
 private final class AlertWindow: NSWindow {
+    var onEscape: (() -> Void)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    override func cancelOperation(_ sender: Any?) { onEscape?() }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { onEscape?() }
+        else { super.keyDown(with: event) }
+    }
 }
 
 final class FullScreenAlertController: NSWindowController {
@@ -15,9 +21,11 @@ final class FullScreenAlertController: NSWindowController {
         super.init(window: primaryWindow)
 
         screenWindows = [primaryWindow]
+        primaryWindow.onEscape = { [weak self] in self?.dismiss() }
         configure(primaryWindow, message: message)
         for screen in screens where screen !== primaryScreen {
             let extraWindow = Self.makeWindow(for: screen)
+            extraWindow.onEscape = { [weak self] in self?.dismiss() }
             screenWindows.append(extraWindow)
             configure(extraWindow, message: message)
         }
@@ -25,7 +33,7 @@ final class FullScreenAlertController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private static func makeWindow(for screen: NSScreen) -> NSWindow {
+    private static func makeWindow(for screen: NSScreen) -> AlertWindow {
         let window = AlertWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)))
         window.title = "收到全屏消息"
@@ -65,13 +73,12 @@ final class FullScreenAlertController: NSWindowController {
         time.textColor = .secondaryLabelColor
         time.alignment = .center
 
-        let close = NSButton(title: "我知道了", target: self, action: #selector(dismiss))
-        close.bezelStyle = .rounded
-        close.controlSize = .large
-        close.font = .systemFont(ofSize: 20, weight: .semibold)
-        close.keyEquivalent = "\r"
+        let hint = NSTextField(labelWithString: "按 ESC 退出")
+        hint.font = .systemFont(ofSize: 18, weight: .medium)
+        hint.textColor = NSColor.white.withAlphaComponent(0.72)
+        hint.alignment = .center
 
-        let stack = NSStackView(views: [badge, sender, body, time, close])
+        let stack = NSStackView(views: [badge, sender, body, time, hint])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 22
@@ -85,9 +92,7 @@ final class FullScreenAlertController: NSWindowController {
             stack.centerYAnchor.constraint(equalTo: content.centerYAnchor),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor, constant: 80),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -80),
-            body.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor, multiplier: 0.78),
-            close.widthAnchor.constraint(equalToConstant: 180),
-            close.heightAnchor.constraint(equalToConstant: 48)
+            body.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor, multiplier: 0.78)
         ])
     }
 
