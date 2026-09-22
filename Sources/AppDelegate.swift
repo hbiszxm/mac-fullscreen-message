@@ -112,6 +112,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             deleteRoot.submenu = deleteMenu
             statusMenu.addItem(deleteRoot)
         }
+        if !peers.isEmpty {
+            let removeRoot = NSMenuItem(title: "移除电脑", action: nil, keyEquivalent: "")
+            let removeMenu = NSMenu(title: "移除电脑")
+            for peer in peers {
+                let item = NSMenuItem(title: peer.name, action: #selector(removePeer(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = peer.id
+                removeMenu.addItem(item)
+            }
+            removeRoot.submenu = removeMenu
+            statusMenu.addItem(removeRoot)
+        }
         let update = NSMenuItem(title: "检查在线更新…", action: #selector(checkForUpdates), keyEquivalent: "")
         update.target = self
         statusMenu.addItem(update)
@@ -308,6 +320,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         guard let text = sender.representedObject as? String else { return }
         customMessages = customMessages.filter { $0 != text }
         setStatus("已删除快捷消息", success: true)
+    }
+
+    @objc private func removePeer(_ sender: NSMenuItem) {
+        guard let peerID = sender.representedObject as? String,
+              let peer = peers.first(where: { $0.id == peerID }) else { return }
+        messenger.dismissPeer(id: peerID)
+        setStatus("已移除 \(peer.name)，对方重启后会重新上线", success: true)
     }
 
     private func showIncoming(_ message: WireMessage) {

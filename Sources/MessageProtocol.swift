@@ -39,6 +39,8 @@ final class LANMessenger {
     private var listener: NWListener?
     private var browser: NWBrowser?
     private var seenMessageIDs: Set<UUID> = []
+    private var advertisedPeerIDs: Set<String> = []
+    private var dismissedPeerIDs: Set<String> = []
     private let instanceID: String
     private(set) var peers: [Peer] = []
 
@@ -85,10 +87,17 @@ final class LANMessenger {
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             guard let self else { return }
             let ownName = self.serviceName
-            let newPeers = results.compactMap { result -> Peer? in
+            let discoveredPeers = results.compactMap { result -> Peer? in
                 guard case let .service(name, _, _, _) = result.endpoint, name != ownName else { return nil }
                 return Peer(id: String(describing: result.endpoint), name: self.visibleName(from: name), endpoint: result.endpoint)
-            }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            }
+            let currentIDs = Set(discoveredPeers.map(\.id))
+            let wentOffline = self.advertisedPeerIDs.subtracting(currentIDs)
+            self.dismissedPeerIDs.subtract(wentOffline)
+            self.advertisedPeerIDs = currentIDs
+            let newPeers = discoveredPeers
+                .filter { !self.dismissedPeerIDs.contains($0.id) }
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             self.peers = newPeers
             DispatchQueue.main.async { self.onPeersChanged?(newPeers) }
         }
@@ -114,6 +123,17 @@ final class LANMessenger {
         listener = nil
         browser = nil
         peers = []
+        advertisedPeerIDs = []
+        dismissedPeerIDs = []
+    }
+
+    func dismissPeer(id: String) {
+        queue.async {
+            self.dismissedPeerIDs.insert(id)
+            let visiblePeers = self.peers.filter { $0.id != id }
+            self.peers = visiblePeers
+            DispatchQueue.main.async { self.onPeersChanged?(visiblePeers) }
+        }
     }
 
     func send(text: String, to endpoint: NWEndpoint, completion: @escaping (Result<Void, Error>) -> Void) {

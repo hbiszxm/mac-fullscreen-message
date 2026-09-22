@@ -11,6 +11,7 @@
 - 接收方全部显示器同时全屏显示，按 ESC 一次关闭所有屏幕。
 - 首页集中提供消息发送、快捷列表、开机启动、在线更新和运行状态。
 - 支持应用内在线更新。
+- 可从菜单中临时移除指定电脑；对方程序重启后会自动重新上线。
 
 ## 命令行安装
 
@@ -82,4 +83,4 @@ curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/do
 构建产物位于 `build/`：
 
 - `全屏消息.app`
-- `全屏消息-Apple芯片-v3.5.5.pkg`
+- `全屏消息-Apple芯片-v3.5.6.pkg`
