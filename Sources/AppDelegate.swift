@@ -119,19 +119,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let statusLabel = NSTextField(labelWithString: "正在启动…")
     private let sendButton = NSButton(title: "发送全屏消息", target: nil, action: nil)
     private let saveButton = NSButton(title: "添加到快捷列表", target: nil, action: nil)
-    private let homeUpdateButton = NSButton(title: "检查在线更新", target: nil, action: nil)
+    private let homeUpdateButton = NSButton(title: "检查更新", target: nil, action: nil)
     private let homeLoginCheckbox = NSButton(checkboxWithTitle: "开机自动运行", target: nil, action: nil)
     private let restartCommandField = NSTextField(string: "pkill -x FullscreenMessage; open \"/Applications/全屏消息.app\"")
     private let copyRestartButton = NSButton(title: "复制命令", target: nil, action: nil)
+    private let uninstallCommandField = NSTextField(string: "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/uninstall.sh?cache=$(date +%s)\" | /bin/bash")
+    private let copyUninstallButton = NSButton(title: "复制命令", target: nil, action: nil)
     private let chatHistoryView = NSTextView()
     private let chatInputField = NSTextField()
     private let chatSendButton = NSButton(title: "发送聊天", target: nil, action: nil)
     private let chatPrivacyView = PrivacyChatView()
     private let chatUnreadDot = UnreadDotView()
     private let menuMessageField = NSTextField()
-    private let menuPeerPopup = NSPopUpButton()
     private let menuSendButton = NSButton(title: "发送", target: nil, action: nil)
     private var menuSendWidthConstraint: NSLayoutConstraint?
+    private var menuSelectedPeerID: String?
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
 
     private var customMessages: [String] {
@@ -205,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
 
         statusMenu.addItem(.separator())
+        addCustomMessageTargetMenu()
         addInlineMessageComposer()
         if !customMessages.isEmpty {
             let deleteRoot = NSMenuItem(title: "删除快捷消息", action: nil, keyEquivalent: "")
@@ -230,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             removeRoot.submenu = removeMenu
             statusMenu.addItem(removeRoot)
         }
-        let update = NSMenuItem(title: "检查在线更新…", action: #selector(checkForUpdates), keyEquivalent: "")
+        let update = NSMenuItem(title: "检查更新…", action: #selector(checkForUpdates), keyEquivalent: "")
         update.target = self
         statusMenu.addItem(update)
         let login = NSMenuItem(title: "开机自动运行", action: #selector(toggleLoginItem(_:)), keyEquivalent: "")
@@ -247,19 +250,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         statusMenu.addItem(quit)
     }
 
-    private func addInlineMessageComposer() {
-        menuPeerPopup.removeAllItems()
+    private func addCustomMessageTargetMenu() {
+        if let selected = menuSelectedPeerID, !peers.contains(where: { $0.id == selected }) {
+            menuSelectedPeerID = nil
+        }
+        let selectedName = menuSelectedPeerID.flatMap { id in peers.first(where: { $0.id == id })?.name }
+        let root = NSMenuItem(title: "自定义消息接收：\(selectedName ?? "所有电脑")", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "选择接收电脑")
+        let all = NSMenuItem(title: "所有电脑", action: #selector(selectInlineMessageTarget(_:)), keyEquivalent: "")
+        all.target = self
+        all.representedObject = NSNull()
+        all.state = menuSelectedPeerID == nil ? .on : .off
+        submenu.addItem(all)
+        if !peers.isEmpty { submenu.addItem(.separator()) }
+        for peer in peers {
+            let item = NSMenuItem(title: peer.name, action: #selector(selectInlineMessageTarget(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = peer.id
+            item.state = menuSelectedPeerID == peer.id ? .on : .off
+            submenu.addItem(item)
+        }
         if peers.isEmpty {
-            menuPeerPopup.addItem(withTitle: "暂无在线电脑")
-            menuPeerPopup.isEnabled = false
+            let none = NSMenuItem(title: "暂无在线电脑", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            submenu.addItem(none)
+        }
+        root.submenu = submenu
+        statusMenu.addItem(root)
+    }
+
+    @objc private func selectInlineMessageTarget(_ sender: NSMenuItem) {
+        menuSelectedPeerID = sender.representedObject as? String
+        rebuildStatusMenu()
+    }
+
+    private func addInlineMessageComposer() {
+        if peers.isEmpty {
             menuSendButton.isEnabled = false
         } else {
-            menuPeerPopup.addItem(withTitle: "所有电脑（\(peers.count) 台）")
-            peers.forEach { menuPeerPopup.addItem(withTitle: $0.name) }
-            menuPeerPopup.isEnabled = true
             menuSendButton.isEnabled = true
         }
-        menuPeerPopup.controlSize = .small
         menuMessageField.placeholderString = "输入自定义全屏消息"
         menuMessageField.target = self
         menuMessageField.action = #selector(sendInlineMenuMessage)
@@ -268,14 +298,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         menuSendButton.bezelStyle = .rounded
         menuSendButton.controlSize = .small
 
-        let title = NSTextField(labelWithString: "自定义全屏消息")
+        let selectedName = menuSelectedPeerID.flatMap { id in peers.first(where: { $0.id == id })?.name }
+        let title = NSTextField(labelWithString: "发送给：\(selectedName ?? "所有电脑")")
         title.font = .systemFont(ofSize: 13, weight: .semibold)
-        let topRow = NSStackView(views: [title, menuPeerPopup])
-        topRow.orientation = .horizontal
-        topRow.alignment = .centerY
-        topRow.spacing = 10
-        title.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        menuPeerPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let inputRow = NSStackView(views: [menuMessageField, menuSendButton])
         inputRow.orientation = .horizontal
         inputRow.spacing = 8
@@ -284,7 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             menuSendWidthConstraint = menuSendButton.widthAnchor.constraint(equalToConstant: 64)
             menuSendWidthConstraint?.isActive = true
         }
-        let stack = NSStackView(views: [topRow, inputRow])
+        let stack = NSStackView(views: [title, inputRow])
         stack.orientation = .vertical
         stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -295,7 +320,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
             stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
             stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
-            topRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
         let item = NSMenuItem()
@@ -305,28 +329,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     @objc private func sendInlineMenuMessage() {
         let text = menuMessageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let index = menuPeerPopup.indexOfSelectedItem
-        guard !text.isEmpty, !peers.isEmpty, index >= 0 else { NSSound.beep(); return }
-        let targets: [Peer]
-        if index == 0 {
-            targets = peers
-        } else {
-            let peerIndex = index - 1
-            guard peers.indices.contains(peerIndex) else { NSSound.beep(); return }
-            targets = [peers[peerIndex]]
-        }
+        guard !text.isEmpty, !peers.isEmpty else { NSSound.beep(); return }
+        let targets = menuSelectedPeerID == nil ? peers : peers.filter { $0.id == menuSelectedPeerID }
+        guard !targets.isEmpty else { NSSound.beep(); return }
         menuMessageField.stringValue = ""
         statusMenu.cancelTracking()
         send(text, to: targets)
     }
 
     private func createComposerWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 900),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 960),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "全屏消息"
         window.center()
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 660, height: 820)
+        window.contentMinSize = NSSize(width: 660, height: 880)
         let root = NSView()
         window.contentView = root
 
@@ -375,6 +392,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         copyRestartButton.target = self
         copyRestartButton.action = #selector(copyRestartCommand)
         copyRestartButton.bezelStyle = .rounded
+        uninstallCommandField.isEditable = false
+        uninstallCommandField.isSelectable = true
+        uninstallCommandField.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        uninstallCommandField.toolTip = "点击后可以选择并复制卸载命令"
+        copyUninstallButton.target = self
+        copyUninstallButton.action = #selector(copyUninstallCommand)
+        copyUninstallButton.bezelStyle = .rounded
         chatHistoryView.isEditable = false
         chatHistoryView.isSelectable = true
         chatHistoryView.font = .systemFont(ofSize: 14)
@@ -417,6 +441,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         restartRow.spacing = 10
         restartCommandField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         copyRestartButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
+        let uninstallLabel = label("卸载命令")
+        let uninstallRow = NSStackView(views: [uninstallCommandField, copyUninstallButton])
+        uninstallRow.orientation = .horizontal
+        uninstallRow.spacing = 10
+        uninstallCommandField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        copyUninstallButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
         let chatLabel = label("临时聊天")
         let chatHeader = NSStackView(views: [chatLabel, chatUnreadDot])
         chatHeader.orientation = .horizontal
@@ -446,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             chatInputRow.heightAnchor.constraint(equalToConstant: 36)
         ])
         chatPrivacyView.keepShieldOnTop()
-        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, chatHeader, chatPrivacyView, settingsLabel, settingsRow, restartLabel, restartRow, statusLabel])
+        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, chatHeader, chatPrivacyView, settingsLabel, settingsRow, restartLabel, restartRow, uninstallLabel, uninstallRow, statusLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 13
@@ -459,6 +489,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.setCustomSpacing(5, after: settingsLabel)
         stack.setCustomSpacing(15, after: settingsRow)
         stack.setCustomSpacing(5, after: restartLabel)
+        stack.setCustomSpacing(12, after: restartRow)
+        stack.setCustomSpacing(5, after: uninstallLabel)
         root.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
@@ -471,7 +503,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             settingsRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             settingsRow.heightAnchor.constraint(equalToConstant: 42),
             restartRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            restartRow.heightAnchor.constraint(equalToConstant: 34)
+            restartRow.heightAnchor.constraint(equalToConstant: 34),
+            uninstallRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            uninstallRow.heightAnchor.constraint(equalToConstant: 34)
         ])
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             self?.chatPrivacyView.conceal()
@@ -695,6 +729,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         pasteboard.clearContents()
         pasteboard.setString(restartCommandField.stringValue, forType: .string)
         setStatus("重启命令已复制", success: true)
+    }
+
+    @objc private func copyUninstallCommand() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(uninstallCommandField.stringValue, forType: .string)
+        setStatus("卸载命令已复制", success: true)
     }
 
     private func enableLoginItemOnFirstInstalledLaunch() {
