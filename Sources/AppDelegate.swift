@@ -376,9 +376,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         buttonRow.alignment = .centerY
         buttonRow.spacing = 8
         let inputRow = NSStackView(views: [messageScroll, buttonRow])
-        inputRow.orientation = .horizontal
-        inputRow.alignment = .centerY
-        inputRow.spacing = 10
+        inputRow.orientation = .vertical
+        inputRow.alignment = .trailing
+        inputRow.spacing = 8
         messageScroll.widthAnchor.constraint(equalToConstant: 240).isActive = true
         if menuSendWidthConstraint == nil {
             menuSendWidthConstraint = menuSendButton.widthAnchor.constraint(equalToConstant: 64)
@@ -392,7 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.orientation = .vertical
         stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 430, height: 124))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 146))
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
