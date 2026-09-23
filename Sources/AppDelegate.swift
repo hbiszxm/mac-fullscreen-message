@@ -329,48 +329,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let customLabel = NSTextField(labelWithString: "自定义消息")
         customLabel.font = .systemFont(ofSize: 13, weight: .semibold)
 
-        let moreLabel = NSTextField(labelWithString: "更多")
-        moreLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         let moreStack = NSStackView()
         moreStack.orientation = .vertical
         moreStack.spacing = 6
-        func addMoreButton(_ title: String, action: Selector) {
+        func makeMoreButton(_ title: String, action: Selector) -> NSButton {
             let button = NSButton(title: title, target: self, action: action)
             button.bezelStyle = .rounded
-            button.alignment = .left
-            moreStack.addArrangedSubview(button)
+            return button
         }
-        func addPayloadButton(_ title: String, payload: String, action: Selector) {
+        func makePayloadButton(_ title: String, payload: String, action: Selector) -> PayloadButton {
             let button = PayloadButton(title: title, target: self, action: action)
             button.payload = payload
             button.bezelStyle = .rounded
-            button.alignment = .left
-            moreStack.addArrangedSubview(button)
+            return button
         }
-        addMoreButton("检查更新…", action: #selector(checkForUpdates))
-        addMoreButton("查看消息历史", action: #selector(showHistory))
+
+        let managementRow = NSStackView(views: [
+            makeMoreButton("检查更新…", action: #selector(checkForUpdates)),
+            makeMoreButton("查看消息历史", action: #selector(showHistory))
+        ])
+        managementRow.orientation = .horizontal
+        managementRow.distribution = .fillEqually
+        managementRow.spacing = 8
+        moreStack.addArrangedSubview(managementRow)
+
+        let commandRow = NSStackView(views: [
+            makePayloadButton("复制重启命令", payload: restartCommandField.stringValue, action: #selector(copyPayloadCommand(_:))),
+            makePayloadButton("复制卸载命令", payload: uninstallCommandField.stringValue, action: #selector(copyPayloadCommand(_:)))
+        ])
+        commandRow.orientation = .horizontal
+        commandRow.distribution = .fillEqually
+        commandRow.spacing = 8
+        moreStack.addArrangedSubview(commandRow)
+
         let login = NSButton(checkboxWithTitle: "开机自动运行", target: self, action: #selector(toggleLoginItem(_:)))
         if #available(macOS 13.0, *) { login.state = SMAppService.mainApp.status == .enabled ? .on : .off }
-        moreStack.addArrangedSubview(login)
-        addPayloadButton("复制安装/更新命令", payload: installCommand, action: #selector(copyPayloadCommand(_:)))
-        addPayloadButton("复制重启命令", payload: restartCommandField.stringValue, action: #selector(copyPayloadCommand(_:)))
-        addPayloadButton("复制卸载命令", payload: uninstallCommandField.stringValue, action: #selector(copyPayloadCommand(_:)))
-        for peer in peers {
-            addPayloadButton("移除电脑：\(peer.name)", payload: peer.id, action: #selector(removePeerButton(_:)))
-        }
-        for text in customMessages {
-            addPayloadButton("删除快捷消息：\(text)", payload: text, action: #selector(deleteCustomMessageButton(_:)))
-        }
-        addMoreButton("退出全屏消息", action: #selector(quitApp))
+        let finalRow = NSStackView(views: [login, makeMoreButton("退出全屏消息", action: #selector(quitApp))])
+        finalRow.orientation = .horizontal
+        finalRow.distribution = .fillEqually
+        finalRow.spacing = 8
+        moreStack.addArrangedSubview(finalRow)
 
-        let stack = NSStackView(views: [openButton, online, state, targetRow, quickLabel, quickStack, customLabel, messageScroll, actionRow, moreLabel, moreStack])
+        var pendingDeleteButtons: [NSButton] = []
+        for text in customMessages {
+            pendingDeleteButtons.append(makePayloadButton("删除：\(text)", payload: text, action: #selector(deleteCustomMessageButton(_:))))
+            if pendingDeleteButtons.count == 2 {
+                let row = NSStackView(views: pendingDeleteButtons)
+                row.orientation = .horizontal
+                row.distribution = .fillEqually
+                row.spacing = 8
+                moreStack.addArrangedSubview(row)
+                pendingDeleteButtons.removeAll()
+            }
+        }
+        if !pendingDeleteButtons.isEmpty {
+            let row = NSStackView(views: pendingDeleteButtons)
+            row.orientation = .horizontal
+            row.distribution = .fillEqually
+            moreStack.addArrangedSubview(row)
+        }
+
+        let stack = NSStackView(views: [openButton, online, state, targetRow, quickLabel, quickStack, customLabel, messageScroll, actionRow, moreStack])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let moreItemCount = 7 + peers.count + customMessages.count
-        let height = min(900, 470 + (defaultMessages.count + customMessages.count + moreItemCount) * 34)
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: height))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 800))
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
@@ -383,6 +407,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             openButton.widthAnchor.constraint(equalTo: stack.widthAnchor),
             moreStack.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+        container.layoutSubtreeIfNeeded()
+        let fittedHeight = min(820, max(430, stack.fittingSize.height + 32))
+        container.setFrameSize(NSSize(width: 390, height: fittedHeight))
         let controller = NSViewController()
         controller.view = container
         statusPopover.contentViewController = controller
