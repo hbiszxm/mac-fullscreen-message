@@ -109,6 +109,29 @@ private final class PayloadButton: NSButton {
     var payload = ""
 }
 
+private final class DeviceChoiceButton: NSButton {
+    var peerID = ""
+    var isChosen = false { didSet { needsDisplay = true } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let fill = isChosen ? NSColor.systemBlue : NSColor.controlBackgroundColor
+        (isHighlighted ? fill.withAlphaComponent(0.75) : fill).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 9, yRadius: 9).fill()
+        (isChosen ? NSColor.systemBlue : NSColor.separatorColor).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 9, yRadius: 9)
+        border.lineWidth = isChosen ? 2 : 1
+        border.stroke()
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: isChosen ? .semibold : .regular),
+            .foregroundColor: isChosen ? NSColor.white : NSColor.labelColor
+        ]
+        let text = NSAttributedString(string: title, attributes: attributes)
+        let size = text.size()
+        text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var statusItem: NSStatusItem!
     private let statusMenu = NSMenu()
@@ -148,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let statusPopover = NSPopover()
     private let popoverPeerPopup = NSPopUpButton()
     private var menuSelectedPeerID: String?
+    private var selectedPopoverPeerIDs: Set<String> = []
     private let installCommand = "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh?cache=$(date +%s)\" | /bin/bash"
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
     private let historyStore = MessageHistoryStore()
@@ -272,22 +296,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let state = NSTextField(labelWithString: "状态：\(lastStatus)")
         state.textColor = .secondaryLabelColor
 
-        popoverPeerPopup.removeAllItems()
-        popoverPeerPopup.addItem(withTitle: peers.isEmpty ? "暂无在线电脑" : "所有电脑（\(peers.count) 台）")
-        peers.forEach { popoverPeerPopup.addItem(withTitle: $0.name) }
-        popoverPeerPopup.isEnabled = !peers.isEmpty
-        popoverPeerPopup.target = self
-        popoverPeerPopup.action = #selector(selectPopoverMessageTarget)
-        if let selectedID = menuSelectedPeerID, let index = peers.firstIndex(where: { $0.id == selectedID }) {
-            popoverPeerPopup.selectItem(at: index + 1)
-        }
         let targetLabel = NSTextField(labelWithString: "接收电脑")
         targetLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        let targetRow = NSStackView(views: [targetLabel, popoverPeerPopup])
-        targetRow.orientation = .horizontal
-        targetRow.alignment = .centerY
-        targetRow.spacing = 10
-        popoverPeerPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        selectedPopoverPeerIDs.formIntersection(Set(peers.map(\.id)))
+        let deviceGrid = NSStackView()
+        deviceGrid.orientation = .vertical
+        deviceGrid.spacing = 7
+        if peers.isEmpty {
+            let empty = NSTextField(labelWithString: "暂无在线电脑")
+            empty.textColor = .secondaryLabelColor
+            deviceGrid.addArrangedSubview(empty)
+        } else {
+            for start in stride(from: 0, to: peers.count, by: 2) {
+                var buttons: [NSView] = []
+                for index in start..<min(start + 2, peers.count) {
+                    let peer = peers[index]
+                    let button = DeviceChoiceButton(title: peer.name, target: self, action: #selector(togglePopoverPeer(_:)))
+                    button.peerID = peer.id
+                    button.isChosen = selectedPopoverPeerIDs.contains(peer.id)
+                    button.heightAnchor.constraint(equalToConstant: 34).isActive = true
+                    buttons.append(button)
+                }
+                if buttons.count == 1 { buttons.append(NSView()) }
+                let row = NSStackView(views: buttons)
+                row.orientation = .horizontal
+                row.distribution = .fillEqually
+                row.spacing = 8
+                deviceGrid.addArrangedSubview(row)
+            }
+        }
 
         let quickLabel = NSTextField(labelWithString: "快捷消息")
         quickLabel.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -299,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             button.messageText = text
             button.bezelStyle = .rounded
             button.alignment = .left
-            button.isEnabled = !peers.isEmpty
+            button.isEnabled = !selectedPopoverPeerIDs.isEmpty
             quickStack.addArrangedSubview(button)
         }
 
@@ -321,7 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         menuSendButton.target = self
         menuSendButton.action = #selector(sendInlineMenuMessage)
         menuSendButton.bezelStyle = .rounded
-        menuSendButton.isEnabled = !peers.isEmpty
+        menuSendButton.isEnabled = !selectedPopoverPeerIDs.isEmpty
         let actionRow = NSStackView(views: [menuFavoriteButton, menuSendButton])
         actionRow.orientation = .horizontal
         actionRow.distribution = .fillEqually
@@ -389,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             moreStack.addArrangedSubview(row)
         }
 
-        let stack = NSStackView(views: [openButton, online, state, targetRow, quickLabel, quickStack, customLabel, messageScroll, actionRow, moreStack])
+        let stack = NSStackView(views: [openButton, online, state, targetLabel, deviceGrid, quickLabel, quickStack, customLabel, messageScroll, actionRow, moreStack])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -400,7 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
             stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
-            targetRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            deviceGrid.widthAnchor.constraint(equalTo: stack.widthAnchor),
             quickStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
             messageScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -436,9 +473,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     @objc private func sendQuickMessageFromPopover(_ sender: QuickMessageButton) {
-        let targets = menuSelectedPeerID == nil ? peers : peers.filter { $0.id == menuSelectedPeerID }
+        let targets = peers.filter { selectedPopoverPeerIDs.contains($0.id) }
         statusPopover.performClose(nil)
         send(sender.messageText, to: targets)
+    }
+
+    @objc private func togglePopoverPeer(_ sender: DeviceChoiceButton) {
+        if selectedPopoverPeerIDs.contains(sender.peerID) {
+            selectedPopoverPeerIDs.remove(sender.peerID)
+            sender.isChosen = false
+        } else {
+            selectedPopoverPeerIDs.insert(sender.peerID)
+            sender.isChosen = true
+        }
+        rebuildStatusPopover()
     }
 
     private func addMoreMenu() {
@@ -677,7 +725,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc private func sendInlineMenuMessage() {
         let text = menuMessageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !peers.isEmpty else { NSSound.beep(); return }
-        let targets = menuSelectedPeerID == nil ? peers : peers.filter { $0.id == menuSelectedPeerID }
+        let targets = peers.filter { selectedPopoverPeerIDs.contains($0.id) }
         guard !targets.isEmpty else { NSSound.beep(); return }
         menuMessageView.string = ""
         statusPopover.performClose(nil)
@@ -947,6 +995,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     private func updatePeers(_ peers: [Peer]) {
         self.peers = peers
+        selectedPopoverPeerIDs.formIntersection(Set(peers.map(\.id)))
         peerPopup.removeAllItems()
         if peers.isEmpty {
             peerPopup.addItem(withTitle: "暂未发现其他电脑")
