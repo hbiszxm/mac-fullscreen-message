@@ -101,35 +101,12 @@ private final class SendChoice: NSObject {
     init(text: String, peerID: String?) { self.text = text; self.peerID = peerID }
 }
 
-private final class QuickMessageButton: NSButton {
+private final class QuickMessageButton: PopoverButton {
     var messageText = ""
 }
 
-private final class PayloadButton: NSButton {
+private final class PayloadButton: PopoverButton {
     var payload = ""
-}
-
-private final class DeviceChoiceButton: NSButton {
-    var peerID = ""
-    var isChosen = false { didSet { needsDisplay = true } }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let fill = isChosen ? NSColor.systemBlue : NSColor.controlBackgroundColor
-        (isHighlighted ? fill.withAlphaComponent(0.75) : fill).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 9, yRadius: 9).fill()
-        (isChosen ? NSColor.systemBlue : NSColor.separatorColor).setStroke()
-        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 9, yRadius: 9)
-        border.lineWidth = isChosen ? 2 : 1
-        border.stroke()
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: isChosen ? .semibold : .regular),
-            .foregroundColor: isChosen ? NSColor.white : NSColor.labelColor
-        ]
-        let text = NSAttributedString(string: title, attributes: attributes)
-        let size = text.size()
-        text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
-    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
@@ -164,9 +141,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let chatSendButton = NSButton(title: "发送聊天", target: nil, action: nil)
     private let chatPrivacyView = PrivacyChatView()
     private let chatUnreadDot = UnreadDotView()
-    private let menuMessageView = NSTextView()
-    private let menuSendButton = NSButton(title: "发送", target: nil, action: nil)
-    private let menuFavoriteButton = NSButton(title: "收藏", target: nil, action: nil)
+    private let menuMessageView = PopoverMessageTextView()
+    private let menuSendButton = PopoverButton(title: "发送", target: nil, action: nil)
+    private let menuFavoriteButton = PopoverButton(title: "收藏", target: nil, action: nil)
     private let customMessagePopover = NSPopover()
     private let statusPopover = NSPopover()
     private let popoverPeerPopup = NSPopUpButton()
@@ -174,6 +151,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var selectedPopoverPeerIDs: Set<String> = []
     private let installCommand = "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh?cache=$(date +%s)\" | /bin/bash"
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
+    private let peerNameStore = PeerNameStore()
+    private var advertisedPeers: [Peer] = []
+    private var popoverQuickButtons: [QuickMessageButton] = []
     private let historyStore = MessageHistoryStore()
     private let historyView = NSTextView()
 
@@ -286,176 +266,214 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     private func rebuildStatusPopover() {
+        let restoreEditorFocus = menuMessageView.window?.firstResponder === menuMessageView
+        let selection = menuMessageView.selectedRange()
         statusPopover.behavior = .transient
         statusPopover.animates = true
-        let openButton = NSButton(title: "打开客户端", target: self, action: #selector(openClientFromPopover))
-        openButton.bezelStyle = .rounded
-        openButton.font = .systemFont(ofSize: 15, weight: .semibold)
-        let online = NSTextField(labelWithString: peers.isEmpty ? "未发现其他电脑" : "在线电脑：\(peers.count) 台")
-        online.textColor = .secondaryLabelColor
-        let state = NSTextField(labelWithString: "状态：\(lastStatus)")
-        state.textColor = .secondaryLabelColor
+        let width: CGFloat = 390
+        let contentWidth = width - 32
+        func row(_ views: [NSView]) -> NSStackView {
+            let row = NSStackView(views: views)
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.distribution = .fillEqually
+            row.spacing = 8
+            row.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            views.forEach { $0.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true }
+            return row
+        }
+        func column(_ views: [NSView], spacing: CGFloat = 8) -> NSStackView {
+            let stack = NSStackView(views: views)
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = spacing
+            views.forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+            return stack
+        }
+        func heading(_ title: String) -> NSTextField {
+            let label = NSTextField(labelWithString: title)
+            label.font = .systemFont(ofSize: 12, weight: .semibold)
+            label.textColor = .secondaryLabelColor
+            return label
+        }
+        func button(_ title: String, symbol: String, action: Selector) -> PopoverButton {
+            let button = PopoverButton(title: title, target: self, action: action)
+            button.symbolName = symbol
+            return button
+        }
+        func command(_ title: String, symbol: String, value: String) -> PayloadButton {
+            let button = PayloadButton(title: title, target: self, action: #selector(copyPayloadCommand(_:)))
+            button.payload = value
+            button.symbolName = symbol
+            return button
+        }
+        func separator() -> NSView {
+            let line = NSBox()
+            line.boxType = .separator
+            line.heightAnchor.constraint(equalToConstant: 1).isActive = true
+            return line
+        }
 
-        let targetLabel = NSTextField(labelWithString: "接收电脑")
-        targetLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let open = button("打开客户端", symbol: "macwindow", action: #selector(openClientFromPopover))
+        open.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        let online = heading("在线电脑 · \(peers.count) 台")
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let versionLabel = heading("V\(version)")
+        versionLabel.alignment = .right
+        let info = NSStackView(views: [online, versionLabel])
+        info.orientation = .horizontal
+        info.distribution = .fillEqually
+        let state = NSTextField(labelWithString: lastStatus)
+        state.font = .systemFont(ofSize: 11)
+        state.textColor = .secondaryLabelColor
+        state.lineBreakMode = .byTruncatingTail
+        state.toolTip = lastStatus
+        let header = column([open, info, state], spacing: 7)
+
         selectedPopoverPeerIDs.formIntersection(Set(peers.map(\.id)))
-        let deviceGrid = NSStackView()
-        deviceGrid.orientation = .vertical
-        deviceGrid.spacing = 7
+        var deviceRows: [NSView] = []
         if peers.isEmpty {
-            let empty = NSTextField(labelWithString: "暂无在线电脑")
-            empty.textColor = .secondaryLabelColor
-            deviceGrid.addArrangedSubview(empty)
+            deviceRows.append(heading("暂无在线电脑"))
         } else {
             for start in stride(from: 0, to: peers.count, by: 2) {
-                var buttons: [NSView] = []
+                var devices: [NSView] = []
                 for index in start..<min(start + 2, peers.count) {
                     let peer = peers[index]
-                    let button = DeviceChoiceButton(title: peer.name, target: self, action: #selector(togglePopoverPeer(_:)))
-                    button.peerID = peer.id
-                    button.isChosen = selectedPopoverPeerIDs.contains(peer.id)
-                    button.heightAnchor.constraint(equalToConstant: 34).isActive = true
-                    buttons.append(button)
+                    let device = DeviceChoiceButton(title: peer.name, target: self, action: #selector(togglePopoverPeer(_:)))
+                    device.peerID = peer.id
+                    device.isChosen = selectedPopoverPeerIDs.contains(peer.id)
+                    device.leadingAligned = true
+                    device.symbolName = "laptopcomputer"
+                    device.toolTip = "\(peer.name) · 右键重命名或删除"
+                    let menu = NSMenu()
+                    for (title, action) in [("重命名", #selector(renamePeer(_:))), ("删除", #selector(removePeer(_:)))] {
+                        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                        item.target = self
+                        item.representedObject = peer.id
+                        menu.addItem(item)
+                    }
+                    device.menu = menu
+                    devices.append(device)
                 }
-                if buttons.count == 1 { buttons.append(NSView()) }
-                let row = NSStackView(views: buttons)
-                row.orientation = .horizontal
-                row.distribution = .fillEqually
-                row.spacing = 8
-                deviceGrid.addArrangedSubview(row)
+                if devices.count == 1 { devices.append(NSView()) }
+                deviceRows.append(row(devices))
             }
         }
+        let devices = column([heading("接收电脑"), column(deviceRows)])
 
-        let quickLabel = NSTextField(labelWithString: "快捷消息")
-        quickLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        let quickStack = NSStackView()
-        quickStack.orientation = .vertical
-        quickStack.spacing = 6
-        for text in defaultMessages + customMessages {
-            let button = QuickMessageButton(title: text, target: self, action: #selector(sendQuickMessageFromPopover(_:)))
-            button.messageText = text
-            button.bezelStyle = .rounded
-            button.alignment = .left
-            button.isEnabled = !selectedPopoverPeerIDs.isEmpty
-            quickStack.addArrangedSubview(button)
+        popoverQuickButtons.removeAll()
+        var quickRows: [NSView] = []
+        let messages = defaultMessages + customMessages
+        for start in stride(from: 0, to: messages.count, by: 3) {
+            var buttons: [NSView] = []
+            for index in start..<min(start + 3, messages.count) {
+                let text = messages[index]
+                let quick = QuickMessageButton(title: text, target: self, action: #selector(sendQuickMessageFromPopover(_:)))
+                quick.messageText = text
+                quick.toolTip = text
+                quick.isEnabled = !selectedPopoverPeerIDs.isEmpty
+                if customMessages.contains(text) {
+                    let menu = NSMenu()
+                    let remove = NSMenuItem(title: "删除收藏", action: #selector(deleteCustomMessage(_:)), keyEquivalent: "")
+                    remove.target = self
+                    remove.representedObject = text
+                    menu.addItem(remove)
+                    quick.menu = menu
+                }
+                popoverQuickButtons.append(quick)
+                buttons.append(quick)
+            }
+            while buttons.count < 3 { buttons.append(NSView()) }
+            quickRows.append(row(buttons))
         }
+        let shortcuts = column([heading("快捷消息"), column(quickRows)])
 
         configurePopoverMessageEditorIfNeeded()
-        let messageScroll = NSScrollView()
-        messageScroll.borderType = .noBorder
-        messageScroll.hasVerticalScroller = true
-        messageScroll.documentView = menuMessageView
-        messageScroll.wantsLayer = true
-        messageScroll.layer?.cornerRadius = 10
-        messageScroll.layer?.borderWidth = 1
-        messageScroll.layer?.borderColor = NSColor.separatorColor.cgColor
-        messageScroll.layer?.masksToBounds = true
-        messageScroll.backgroundColor = .controlBackgroundColor
-        messageScroll.heightAnchor.constraint(equalToConstant: 90).isActive = true
+        let editor = NSScrollView()
+        editor.borderType = .noBorder
+        editor.hasVerticalScroller = true
+        editor.scrollerStyle = .overlay
+        editor.documentView = menuMessageView
+        editor.drawsBackground = false
+        editor.translatesAutoresizingMaskIntoConstraints = false
+        let editorFrame = PopoverEditorFrame()
+        editorFrame.addSubview(editor)
+        NSLayoutConstraint.activate([
+            editorFrame.heightAnchor.constraint(equalToConstant: 76),
+            editor.leadingAnchor.constraint(equalTo: editorFrame.leadingAnchor, constant: 3),
+            editor.trailingAnchor.constraint(equalTo: editorFrame.trailingAnchor, constant: -3),
+            editor.topAnchor.constraint(equalTo: editorFrame.topAnchor, constant: 3),
+            editor.bottomAnchor.constraint(equalTo: editorFrame.bottomAnchor, constant: -3)
+        ])
         menuFavoriteButton.target = self
         menuFavoriteButton.action = #selector(favoriteInlineMenuMessage)
-        menuFavoriteButton.bezelStyle = .rounded
+        menuFavoriteButton.symbolName = "star"
         menuSendButton.target = self
         menuSendButton.action = #selector(sendInlineMenuMessage)
-        menuSendButton.bezelStyle = .rounded
+        menuSendButton.symbolName = "paperplane.fill"
+        menuSendButton.primary = true
         menuSendButton.isEnabled = !selectedPopoverPeerIDs.isEmpty
-        let actionRow = NSStackView(views: [menuFavoriteButton, menuSendButton])
-        actionRow.orientation = .horizontal
-        actionRow.distribution = .fillEqually
-        actionRow.spacing = 8
-        let customLabel = NSTextField(labelWithString: "自定义消息")
-        customLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let composer = column([heading("自定义消息"), editorFrame, row([menuFavoriteButton, menuSendButton])])
 
-        let moreStack = NSStackView()
-        moreStack.orientation = .vertical
-        moreStack.spacing = 6
-        func makeMoreButton(_ title: String, action: Selector) -> NSButton {
-            let button = NSButton(title: title, target: self, action: action)
-            button.bezelStyle = .rounded
-            return button
-        }
-        func makePayloadButton(_ title: String, payload: String, action: Selector) -> PayloadButton {
-            let button = PayloadButton(title: title, target: self, action: action)
-            button.payload = payload
-            button.bezelStyle = .rounded
-            return button
-        }
-
-        let managementRow = NSStackView(views: [
-            makeMoreButton("检查更新…", action: #selector(checkForUpdates)),
-            makeMoreButton("查看消息历史", action: #selector(showHistory))
+        let management = row([
+            button("检查更新", symbol: "arrow.triangle.2.circlepath", action: #selector(checkForUpdates)),
+            button("查看消息历史", symbol: "clock", action: #selector(showHistory))
         ])
-        managementRow.orientation = .horizontal
-        managementRow.distribution = .fillEqually
-        managementRow.spacing = 8
-        moreStack.addArrangedSubview(managementRow)
-
-        let commandRow = NSStackView(views: [
-            makePayloadButton("复制重启命令", payload: restartCommandField.stringValue, action: #selector(copyPayloadCommand(_:))),
-            makePayloadButton("复制卸载命令", payload: uninstallCommandField.stringValue, action: #selector(copyPayloadCommand(_:)))
+        let commands = row([
+            command("复制重启命令", symbol: "arrow.clockwise", value: restartCommandField.stringValue),
+            command("复制卸载命令", symbol: "trash", value: uninstallCommandField.stringValue)
         ])
-        commandRow.orientation = .horizontal
-        commandRow.distribution = .fillEqually
-        commandRow.spacing = 8
-        moreStack.addArrangedSubview(commandRow)
-
-        let login = NSButton(checkboxWithTitle: "开机自动运行", target: self, action: #selector(toggleLoginItem(_:)))
-        if #available(macOS 13.0, *) { login.state = SMAppService.mainApp.status == .enabled ? .on : .off }
-        let finalRow = NSStackView(views: [login, makeMoreButton("退出全屏消息", action: #selector(quitApp))])
-        finalRow.orientation = .horizontal
-        finalRow.distribution = .fillEqually
-        finalRow.spacing = 8
-        moreStack.addArrangedSubview(finalRow)
-
-        var pendingDeleteButtons: [NSButton] = []
-        for text in customMessages {
-            pendingDeleteButtons.append(makePayloadButton("删除：\(text)", payload: text, action: #selector(deleteCustomMessageButton(_:))))
-            if pendingDeleteButtons.count == 2 {
-                let row = NSStackView(views: pendingDeleteButtons)
-                row.orientation = .horizontal
-                row.distribution = .fillEqually
-                row.spacing = 8
-                moreStack.addArrangedSubview(row)
-                pendingDeleteButtons.removeAll()
-            }
-        }
-        if !pendingDeleteButtons.isEmpty {
-            let row = NSStackView(views: pendingDeleteButtons)
-            row.orientation = .horizontal
-            row.distribution = .fillEqually
-            moreStack.addArrangedSubview(row)
-        }
-
-        let stack = NSStackView(views: [openButton, online, state, targetLabel, deviceGrid, quickLabel, quickStack, customLabel, messageScroll, actionRow, moreStack])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
+        let login = button("开机自动运行", symbol: "circle", action: #selector(toggleLoginItem(_:)))
+        if #available(macOS 13.0, *), SMAppService.mainApp.status == .enabled { login.symbolName = "checkmark.circle" }
+        let footer = row([login, button("退出全屏消息", symbol: "power", action: #selector(quitApp))])
+        let utilities = column([management, commands, footer])
+        let stack = column([header, devices, shortcuts, composer, separator(), utilities], spacing: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 800))
-        container.addSubview(stack)
+        stack.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
+        let document = PopoverBackgroundView()
+        document.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
-            deviceGrid.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            quickStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            messageScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            openButton.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            moreStack.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -16)
         ])
-        container.layoutSubtreeIfNeeded()
-        let fittedHeight = min(820, max(430, stack.fittingSize.height + 32))
-        container.setFrameSize(NSSize(width: 390, height: fittedHeight))
+        let height = ceil(stack.fittingSize.height) + 32
+        let availableHeight = (statusItem.button?.window?.screen ?? NSScreen.main)?.visibleFrame.height ?? 800
+        let visibleHeight = min(height, max(280, min(740, availableHeight - 40)))
+        document.setFrameSize(NSSize(width: width, height: height))
+        let container = PopoverBackgroundView(frame: NSRect(x: 0, y: 0, width: width, height: visibleHeight))
+        let scroll = NSScrollView(frame: container.bounds)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = height > visibleHeight
+        scroll.scrollerStyle = .overlay
+        scroll.documentView = document
+        container.addSubview(scroll)
         let controller = NSViewController()
         controller.view = container
         statusPopover.contentViewController = controller
         statusPopover.contentSize = container.frame.size
+        if restoreEditorFocus {
+            menuMessageView.setSelectedRange(selection)
+            container.window?.makeFirstResponder(menuMessageView)
+            DispatchQueue.main.async { [weak self, weak container] in
+                guard let self, let container, self.statusPopover.contentViewController?.view === container else { return }
+                container.window?.makeFirstResponder(self.menuMessageView)
+            }
+        }
     }
 
     private func configurePopoverMessageEditorIfNeeded() {
         menuMessageView.font = .systemFont(ofSize: 14)
         menuMessageView.isRichText = false
+        menuMessageView.isVerticallyResizable = true
+        menuMessageView.isHorizontallyResizable = false
+        menuMessageView.backgroundColor = .textBackgroundColor
+        menuMessageView.drawsBackground = false
+        menuMessageView.allowsUndo = true
+        menuMessageView.textColor = .labelColor
         menuMessageView.textContainerInset = NSSize(width: 8, height: 7)
         menuMessageView.textContainer?.widthTracksTextView = true
         if menuMessageView.menu == nil {
@@ -481,12 +499,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc private func togglePopoverPeer(_ sender: DeviceChoiceButton) {
         if selectedPopoverPeerIDs.contains(sender.peerID) {
             selectedPopoverPeerIDs.remove(sender.peerID)
-            sender.isChosen = false
         } else {
             selectedPopoverPeerIDs.insert(sender.peerID)
-            sender.isChosen = true
         }
-        rebuildStatusPopover()
+        sender.isChosen = selectedPopoverPeerIDs.contains(sender.peerID)
+        menuSendButton.isEnabled = !selectedPopoverPeerIDs.isEmpty
+        menuSendButton.needsDisplay = true
+        for button in popoverQuickButtons {
+            button.isEnabled = !selectedPopoverPeerIDs.isEmpty
+            button.needsDisplay = true
+        }
+    }
+
+    @objc private func renamePeer(_ sender: NSMenuItem) {
+        guard let peerID = sender.representedObject as? String,
+              let peer = advertisedPeers.first(where: { $0.id == peerID }) else { return }
+        statusPopover.performClose(nil)
+        let alert = NSAlert()
+        alert.messageText = "重命名设备"
+        alert.informativeText = "设置这台电脑上显示的设备名称。"
+        let name = NSTextField(string: peerNameStore.displayName(for: peer))
+        name.frame = NSRect(x: 0, y: 0, width: 300, height: 26)
+        alert.accessoryView = name
+        alert.addButton(withTitle: "保存")
+        alert.addButton(withTitle: "取消")
+        alert.window.initialFirstResponder = name
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            if peerNameStore.setName(name.stringValue, for: peer) {
+                updatePeers(advertisedPeers)
+                setStatus("已重命名为 \(peerNameStore.displayName(for: peer))", success: true)
+            } else {
+                setStatus("名称不能为空", success: false)
+            }
+        }
+        toggleStatusPopover()
     }
 
     private func addMoreMenu() {
@@ -993,7 +1040,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         chatPrivacyView.keyboardActive = true
     }
 
-    private func updatePeers(_ peers: [Peer]) {
+    private func updatePeers(_ discoveredPeers: [Peer]) {
+        let oldIndex = peerPopup.indexOfSelectedItem - 1
+        let selectedHomeID = peers.indices.contains(oldIndex) ? peers[oldIndex].id : nil
+        let hadNoSelection = peerPopup.indexOfSelectedItem < 0 && !peers.isEmpty
+        advertisedPeers = discoveredPeers
+        let peers = peerNameStore.renamed(discoveredPeers)
         self.peers = peers
         selectedPopoverPeerIDs.formIntersection(Set(peers.map(\.id)))
         peerPopup.removeAllItems()
@@ -1005,6 +1057,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         } else {
             peerPopup.addItem(withTitle: "所有电脑（\(peers.count) 台）")
             peers.forEach { peerPopup.addItem(withTitle: $0.name) }
+            if let selectedHomeID {
+                if let index = peers.firstIndex(where: { $0.id == selectedHomeID }) {
+                    peerPopup.selectItem(at: index + 1)
+                } else {
+                    peerPopup.select(nil)
+                }
+            } else if hadNoSelection {
+                peerPopup.select(nil)
+            }
             peerPopup.isEnabled = true
             sendButton.isEnabled = true
             chatSendButton.isEnabled = true
@@ -1153,7 +1214,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc private func removePeer(_ sender: NSMenuItem) {
         guard let peerID = sender.representedObject as? String,
               let peer = peers.first(where: { $0.id == peerID }) else { return }
+        selectedPopoverPeerIDs.remove(peerID)
         messenger.dismissPeer(id: peerID)
+        updatePeers(advertisedPeers.filter { $0.id != peerID })
         setStatus("已移除 \(peer.name)，对方重启后会重新上线", success: true)
     }
 
