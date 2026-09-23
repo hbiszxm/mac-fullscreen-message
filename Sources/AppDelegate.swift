@@ -130,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let chatSendButton = NSButton(title: "发送聊天", target: nil, action: nil)
     private let chatPrivacyView = PrivacyChatView()
     private let chatUnreadDot = UnreadDotView()
-    private let menuMessageField = NSTextField()
+    private let menuMessageView = NSTextView()
     private let menuSendButton = NSButton(title: "发送", target: nil, action: nil)
     private let menuFavoriteButton = NSButton(title: "收藏", target: nil, action: nil)
     private var menuSendWidthConstraint: NSLayoutConstraint?
@@ -171,17 +171,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     private func rebuildStatusMenu() {
         statusMenu.removeAllItems()
+        let home = NSMenuItem(title: "打开客户端", action: #selector(showHome), keyEquivalent: "")
+        home.target = self
+        statusMenu.addItem(home)
+        statusMenu.addItem(.separator())
+
         let online = NSMenuItem(title: peers.isEmpty ? "未发现其他电脑" : "在线电脑：\(peers.count) 台", action: nil, keyEquivalent: "")
         online.isEnabled = false
         statusMenu.addItem(online)
         let recent = NSMenuItem(title: "状态：\(lastStatus)", action: nil, keyEquivalent: "")
         recent.isEnabled = false
         statusMenu.addItem(recent)
-        statusMenu.addItem(.separator())
-
-        let home = NSMenuItem(title: "显示首页", action: #selector(showHome), keyEquivalent: "")
-        home.target = self
-        statusMenu.addItem(home)
         statusMenu.addItem(.separator())
 
         for text in defaultMessages + customMessages {
@@ -324,9 +324,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         } else {
             menuSendButton.isEnabled = true
         }
-        menuMessageField.placeholderString = "输入自定义全屏消息"
-        menuMessageField.target = self
-        menuMessageField.action = #selector(sendInlineMenuMessage)
+        menuMessageView.font = .systemFont(ofSize: 14)
+        menuMessageView.isRichText = false
+        menuMessageView.textContainerInset = NSSize(width: 8, height: 7)
+        menuMessageView.isVerticallyResizable = true
+        menuMessageView.isHorizontallyResizable = false
+        menuMessageView.textContainer?.widthTracksTextView = true
+        menuMessageView.toolTip = "支持粘贴、复制、剪切和全选"
+        let editMenu = NSMenu(title: "编辑")
+        for (title, action, key) in [
+            ("剪切", #selector(NSText.cut(_:)), "x"),
+            ("复制", #selector(NSText.copy(_:)), "c"),
+            ("粘贴", #selector(NSText.paste(_:)), "v"),
+            ("全选", #selector(NSText.selectAll(_:)), "a")
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            editMenu.addItem(item)
+        }
+        menuMessageView.menu = editMenu
+        let messageScroll = NSScrollView()
+        messageScroll.borderType = .bezelBorder
+        messageScroll.hasVerticalScroller = true
+        messageScroll.documentView = menuMessageView
+        messageScroll.translatesAutoresizingMaskIntoConstraints = false
+        messageScroll.heightAnchor.constraint(equalToConstant: 62).isActive = true
         menuSendButton.target = self
         menuSendButton.action = #selector(sendInlineMenuMessage)
         menuSendButton.bezelStyle = .rounded
@@ -339,10 +360,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let selectedName = menuSelectedPeerID.flatMap { id in peers.first(where: { $0.id == id })?.name }
         let title = NSTextField(labelWithString: "发送给：\(selectedName ?? "所有电脑")")
         title.font = .systemFont(ofSize: 13, weight: .semibold)
-        let inputRow = NSStackView(views: [menuMessageField, menuFavoriteButton, menuSendButton])
+        let buttonRow = NSStackView(views: [menuFavoriteButton, menuSendButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 8
+        let inputRow = NSStackView(views: [messageScroll, buttonRow])
         inputRow.orientation = .horizontal
-        inputRow.spacing = 8
-        menuMessageField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        inputRow.alignment = .centerY
+        inputRow.spacing = 10
+        messageScroll.setContentHuggingPriority(.defaultLow, for: .horizontal)
         if menuSendWidthConstraint == nil {
             menuSendWidthConstraint = menuSendButton.widthAnchor.constraint(equalToConstant: 64)
             menuSendWidthConstraint?.isActive = true
@@ -355,7 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.orientation = .vertical
         stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 410, height: 76))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 96))
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
@@ -370,19 +396,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     @objc private func sendInlineMenuMessage() {
-        let text = menuMessageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = menuMessageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !peers.isEmpty else { NSSound.beep(); return }
         let targets = menuSelectedPeerID == nil ? peers : peers.filter { $0.id == menuSelectedPeerID }
         guard !targets.isEmpty else { NSSound.beep(); return }
-        menuMessageField.stringValue = ""
+        menuMessageView.string = ""
         statusMenu.cancelTracking()
         send(text, to: targets)
     }
 
     @objc private func favoriteInlineMenuMessage() {
-        let text = menuMessageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = menuMessageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard addCustomMessage(text) else { return }
-        menuMessageField.stringValue = ""
+        menuMessageView.string = ""
         statusMenu.cancelTracking()
         setStatus("已收藏到快捷消息", success: true)
     }
