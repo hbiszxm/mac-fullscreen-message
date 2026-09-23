@@ -118,6 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var transientStatusMark: String?
     private var lastStatus = "正在启动…"
     private var activity: NSObjectProtocol?
+    private var automaticUpdateTimer: Timer?
+    private var updateInProgress = false
     private let nameField = NSTextField()
     private let peerPopup = NSPopUpButton()
     private let messageView = NSTextView()
@@ -165,6 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         enableLoginItemOnFirstInstalledLaunch()
         activity = ProcessInfo.processInfo.beginActivity(options: [.automaticTerminationDisabled, .suddenTerminationDisabled], reason: "持续接收局域网消息")
         if CommandLine.arguments.contains("--show-home") { showHome() }
+        startAutomaticUpdates()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -1141,13 +1144,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc private func quitApp() { NSApp.terminate(nil) }
 
     @objc private func checkForUpdates() {
+        performUpdateCheck(interactive: true)
+    }
+
+    private func startAutomaticUpdates() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            self?.performUpdateCheck(interactive: false)
+        }
+        automaticUpdateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
+            self?.performUpdateCheck(interactive: false)
+        }
+    }
+
+    private func performUpdateCheck(interactive: Bool) {
+        guard !updateInProgress else { return }
+        updateInProgress = true
         setStatus("正在检查更新…")
         UpdateManager.check { [weak self] result in
             guard let self else { return }
             switch result {
             case .upToDate(let version):
+                self.updateInProgress = false
                 self.setStatus("当前已是最新版 V\(version)", success: true)
-                self.showUpdateAlert(title: "已经是最新版", message: "当前版本 V\(version)，无需更新。")
+                if interactive {
+                    self.showUpdateAlert(title: "已经是最新版", message: "当前版本 V\(version)，无需更新。")
+                }
             case .available(let release):
                 self.setStatus("正在下载 V\(release.version)…")
                 UpdateManager.download(release) { [weak self] downloadResult in
@@ -1162,18 +1183,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                                 self.setStatus("更新完成，正在重新启动…", success: true)
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
                             case .failure(let error):
+                                self.updateInProgress = false
                                 self.setStatus("自动更新失败", success: false)
-                                self.showUpdateAlert(title: "自动更新失败", message: error.localizedDescription)
+                                if interactive {
+                                    self.showUpdateAlert(title: "自动更新失败", message: error.localizedDescription)
+                                }
                             }
                         }
                     case .failure(let error):
+                        self.updateInProgress = false
                         self.setStatus("更新下载失败", success: false)
-                        self.showUpdateAlert(title: "下载失败", message: error.localizedDescription)
+                        if interactive {
+                            self.showUpdateAlert(title: "下载失败", message: error.localizedDescription)
+                        }
                     }
                 }
             case .failure(let error):
+                self.updateInProgress = false
                 self.setStatus("检查更新失败", success: false)
-                self.showUpdateAlert(title: "检查更新失败", message: error.localizedDescription)
+                if interactive {
+                    self.showUpdateAlert(title: "检查更新失败", message: error.localizedDescription)
+                }
             }
         }
     }
