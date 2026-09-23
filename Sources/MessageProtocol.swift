@@ -7,12 +7,15 @@ struct WireMessage: Codable {
     let text: String
     let sentAt: Date
     let kind: String?
+    let senderInstanceID: String?
+    let relatedMessageID: UUID?
 }
 
 struct Peer: Hashable {
     let id: String
     let name: String
     let endpoint: NWEndpoint
+    let instanceID: String?
 
     static func == (lhs: Peer, rhs: Peer) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -90,7 +93,7 @@ final class LANMessenger {
             let ownName = self.serviceName
             let discoveredPeers = results.compactMap { result -> Peer? in
                 guard case let .service(name, _, _, _) = result.endpoint, name != ownName else { return nil }
-                return Peer(id: String(describing: result.endpoint), name: self.visibleName(from: name), endpoint: result.endpoint)
+                return Peer(id: String(describing: result.endpoint), name: self.visibleName(from: name), endpoint: result.endpoint, instanceID: self.instanceID(from: name))
             }
             let currentIDs = Set(discoveredPeers.map(\.id))
             let wentOffline = self.advertisedPeerIDs.subtracting(currentIDs)
@@ -118,6 +121,12 @@ final class LANMessenger {
         return String(serviceName[..<marker.lowerBound])
     }
 
+    private func instanceID(from serviceName: String) -> String? {
+        guard let start = serviceName.range(of: "〔", options: .backwards),
+              let end = serviceName.range(of: "〕", range: start.upperBound..<serviceName.endIndex) else { return nil }
+        return String(serviceName[start.upperBound..<end.lowerBound])
+    }
+
     func stop() {
         listener?.cancel()
         browser?.cancel()
@@ -137,8 +146,8 @@ final class LANMessenger {
         }
     }
 
-    func send(text: String, kind: String = "alert", to endpoint: NWEndpoint, completion: @escaping (Result<Void, Error>) -> Void) {
-        let message = WireMessage(id: UUID(), sender: displayName, text: text, sentAt: Date(), kind: kind)
+    func send(text: String, kind: String = "alert", messageID: UUID = UUID(), relatedMessageID: UUID? = nil, to endpoint: NWEndpoint, completion: @escaping (Result<Void, Error>) -> Void) {
+        let message = WireMessage(id: messageID, sender: displayName, text: text, sentAt: Date(), kind: kind, senderInstanceID: instanceID, relatedMessageID: relatedMessageID)
         guard let body = try? JSONEncoder().encode(message) else {
             completion(.failure(MessageError.encodeFailed)); return
         }
@@ -150,6 +159,15 @@ final class LANMessenger {
         packet.append(body)
 
         sendPacket(packet, to: endpoint, attempt: 1, completion: completion)
+    }
+
+    func respond(to message: WireMessage, accepted: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard let senderID = message.senderInstanceID,
+              let peer = peers.first(where: { $0.instanceID == senderID }) else {
+            completion(.failure(MessageError.connectionFailed("找不到发送者，无法返回处理结果")))
+            return
+        }
+        send(text: accepted ? "收到" : "拒绝", kind: accepted ? "accepted" : "rejected", relatedMessageID: message.id, to: peer.endpoint, completion: completion)
     }
 
     private func sendPacket(_ packet: Data, to endpoint: NWEndpoint, attempt: Int, completion: @escaping (Result<Void, Error>) -> Void) {

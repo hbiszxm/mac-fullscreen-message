@@ -56,8 +56,10 @@ final class FullScreenAlertController: NSWindowController {
     private var screenWindows: [NSWindow] = []
     private var backgrounds: [AlertBackgroundView] = []
     private var messagePanels: [NSView] = []
+    private let responseHandler: (Bool) -> Void
 
-    init(message: WireMessage) {
+    init(message: WireMessage, responseHandler: @escaping (Bool) -> Void) {
+        self.responseHandler = responseHandler
         let screens = NSScreen.screens
         let primaryScreen = NSScreen.main ?? screens.first!
         let primaryWindow = Self.makeWindow(for: primaryScreen)
@@ -141,7 +143,21 @@ final class FullScreenAlertController: NSWindowController {
         hint.textColor = NSColor.white.withAlphaComponent(0.72)
         hint.alignment = .center
 
-        let stack = NSStackView(views: [badge, sender, body, time, hint])
+        let accepted = NSButton(title: "收到", target: self, action: #selector(acceptMessage))
+        accepted.bezelStyle = .rounded
+        accepted.controlSize = .large
+        accepted.font = .systemFont(ofSize: 18, weight: .semibold)
+        let rejected = NSButton(title: "拒绝", target: self, action: #selector(rejectMessage))
+        rejected.bezelStyle = .rounded
+        rejected.controlSize = .large
+        rejected.font = .systemFont(ofSize: 18, weight: .semibold)
+        let responseRow = NSStackView(views: [accepted, rejected])
+        responseRow.orientation = .horizontal
+        responseRow.distribution = .fillEqually
+        responseRow.spacing = 16
+        responseRow.widthAnchor.constraint(equalToConstant: 360).isActive = true
+
+        let stack = NSStackView(views: [badge, sender, body, time, responseRow, hint])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 22
@@ -161,6 +177,16 @@ final class FullScreenAlertController: NSWindowController {
             stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -42),
             body.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor, multiplier: 0.78)
         ])
+    }
+
+    @objc private func acceptMessage() {
+        responseHandler(true)
+        dismiss()
+    }
+
+    @objc private func rejectMessage() {
+        responseHandler(false)
+        dismiss()
     }
 
     private static func messageFontSize(for text: String, in size: NSSize) -> CGFloat {

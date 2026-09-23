@@ -109,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var statusItem: NSStatusItem!
     private let statusMenu = NSMenu()
     private var window: NSWindow!
+    private var historyWindow: NSWindow!
     private var messenger: LANMessenger!
     private var peers: [Peer] = []
     private var alerts: [FullScreenAlertController] = []
@@ -143,6 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var menuSelectedPeerID: String?
     private let installCommand = "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh?cache=$(date +%s)\" | /bin/bash"
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
+    private let historyStore = MessageHistoryStore()
+    private let historyView = NSTextView()
 
     private var customMessages: [String] {
         get { UserDefaults.standard.stringArray(forKey: "customMessages") ?? [] }
@@ -157,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
         createStatusItem()
         createComposerWindow()
+        createHistoryWindow()
         configureMessenger()
         enableLoginItemOnFirstInstalledLaunch()
         activity = ProcessInfo.processInfo.beginActivity(options: [.automaticTerminationDisabled, .suddenTerminationDisabled], reason: "持续接收局域网消息")
@@ -331,6 +335,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             item.representedObject = object
             more.menu?.addItem(item)
         }
+        let history = NSMenuItem(title: "查看消息历史", action: #selector(showHistory), keyEquivalent: "")
+        history.target = self
+        more.menu?.addItem(history)
         more.menu?.addItem(.separator())
         let login = NSMenuItem(title: "开机自动运行", action: #selector(toggleLoginItem(_:)), keyEquivalent: "")
         login.target = self
@@ -743,6 +750,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         settingsRow.orientation = .horizontal
         settingsRow.distribution = .fillEqually
         settingsRow.spacing = 12
+        let historyButton = NSButton(title: "查看消息历史", target: self, action: #selector(showHistory))
+        historyButton.bezelStyle = .rounded
+        historyButton.controlSize = .large
+        settingsRow.addArrangedSubview(historyButton)
         let restartLabel = label("重启命令")
         let restartRow = NSStackView(views: [restartCommandField, copyRestartButton])
         restartRow.orientation = .horizontal
@@ -820,6 +831,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
+    private func createHistoryWindow() {
+        historyWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+                                 styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        historyWindow.title = "消息历史"
+        historyWindow.center()
+        historyWindow.isReleasedWhenClosed = false
+        historyView.isEditable = false
+        historyView.isSelectable = true
+        historyView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        historyView.textContainerInset = NSSize(width: 16, height: 16)
+        let scroll = NSScrollView(frame: historyWindow.contentView?.bounds ?? .zero)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.documentView = historyView
+        historyWindow.contentView?.addSubview(scroll)
+        historyStore.onChange = { [weak self] in self?.refreshHistory() }
+        refreshHistory()
+    }
+
+    @objc private func showHistory() {
+        refreshHistory()
+        NSApp.activate(ignoringOtherApps: true)
+        historyWindow.makeKeyAndOrderFront(nil)
+    }
+
+    private func refreshHistory() {
+        historyView.string = historyStore.formattedText()
+    }
+
+    private var localDisplayName: String { nameField.stringValue.isEmpty ? "本机" : nameField.stringValue }
+
+    private func addHistory(id: UUID, direction: String, sender: String, recipients: String, text: String, status: String) {
+        historyStore.add(MessageHistoryEntry(id: id, date: Date(), direction: direction, sender: sender, recipients: recipients, text: text, status: status))
+    }
+
     private func label(_ text: String) -> NSTextField {
         let field = NSTextField(labelWithString: text)
         field.font = .systemFont(ofSize: 14, weight: .medium)
@@ -830,8 +876,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         messenger = LANMessenger(displayName: nameField.stringValue)
         messenger.onPeersChanged = { [weak self] peers in self?.updatePeers(peers) }
         messenger.onMessage = { [weak self] message in
-            if message.kind == "chat" { self?.showIncomingChat(message) }
-            else { self?.showIncoming(message) }
+            switch message.kind {
+            case "chat": self?.showIncomingChat(message)
+            case "accepted", "rejected": self?.handleMessageResponse(message)
+            default: self?.showIncoming(message)
+            }
         }
         messenger.onStatus = { [weak self] text in self?.setStatus(text) }
         messenger.start()
@@ -886,8 +935,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         var remaining = targets.count
         var failures = 0
         for peer in targets {
-            messenger.send(text: text, to: peer.endpoint) { [weak self] result in
-                if case .failure = result { failures += 1 }
+            let messageID = UUID()
+            addHistory(id: messageID, direction: "发送", sender: localDisplayName, recipients: peer.name, text: text, status: "已送达，等待对方确认")
+            messenger.send(text: text, messageID: messageID, to: peer.endpoint) { [weak self] result in
+                if case .failure = result {
+                    failures += 1
+                    self?.historyStore.update(id: messageID, status: "发送失败")
+                }
                 remaining -= 1
                 guard remaining == 0, let self else { return }
                 self.setStatus(failures == 0 ? "对方已确认收到" : "发送失败：\(failures) 台未确认", success: failures == 0)
@@ -947,9 +1001,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         var remaining = targets.count
         var failures = 0
         for peer in targets {
-            messenger.send(text: text, kind: "chat", to: peer.endpoint) { [weak self] result in
+            let messageID = UUID()
+            addHistory(id: messageID, direction: "发送聊天", sender: localDisplayName, recipients: peer.name, text: text, status: "已送达")
+            messenger.send(text: text, kind: "chat", messageID: messageID, to: peer.endpoint) { [weak self] result in
                 guard let self else { return }
-                if case .failure = result { failures += 1 }
+                if case .failure = result {
+                    failures += 1
+                    self.historyStore.update(id: messageID, status: "发送失败")
+                }
                 remaining -= 1
                 guard remaining == 0 else { return }
                 self.chatSendButton.isEnabled = !self.peers.isEmpty
@@ -966,6 +1025,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     private func showIncomingChat(_ message: WireMessage) {
+        addHistory(id: message.id, direction: "收到聊天", sender: message.sender, recipients: localDisplayName, text: message.text, status: "已收到")
         appendChatLine(sender: message.sender, text: message.text, incoming: true)
         setStatus("收到 \(message.sender) 的聊天消息")
         chatUnreadDot.startBlinking()
@@ -1009,12 +1069,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     private func showIncoming(_ message: WireMessage) {
+        addHistory(id: message.id, direction: "收到", sender: message.sender, recipients: localDisplayName, text: message.text, status: "等待处理")
         setStatus("已收到来自 \(message.sender) 的消息", success: true)
         NSSound(named: "Glass")?.play()
-        let alert = FullScreenAlertController(message: message)
+        let alert = FullScreenAlertController(message: message) { [weak self] accepted in
+            guard let self else { return }
+            self.historyStore.update(id: message.id, status: accepted ? "已点击收到" : "已拒绝")
+            self.messenger.respond(to: message, accepted: accepted) { [weak self] result in
+                if case .failure(let error) = result {
+                    self?.setStatus("处理结果返回失败：\(error.localizedDescription)", success: false)
+                } else {
+                    self?.setStatus(accepted ? "已向发送者返回：收到" : "已向发送者返回：拒绝", success: true)
+                }
+            }
+        }
         alerts.append(alert)
         alert.present()
         alerts = alerts.filter { $0.window?.isVisible == true }
+    }
+
+    private func handleMessageResponse(_ message: WireMessage) {
+        guard let relatedID = message.relatedMessageID else { return }
+        let accepted = message.kind == "accepted"
+        historyStore.update(id: relatedID, status: accepted ? "对方已收到" : "对方已拒绝")
+        setStatus(accepted ? "\(message.sender) 已确认收到" : "\(message.sender) 已拒绝消息", success: accepted)
+        showSendToast(message: accepted ? "对方已确认收到" : "对方已拒绝", recipients: message.sender, failures: accepted ? 0 : 1,
+                      titleOverride: accepted ? "对方已收到" : "对方已拒绝",
+                      detailOverride: "来自：\(message.sender)")
     }
 
     @objc private func showComposer() {
@@ -1107,7 +1188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         alert.runModal()
     }
 
-    private func showSendToast(message: String, recipients: String, failures: Int) {
+    private func showSendToast(message: String, recipients: String, failures: Int, titleOverride: String? = nil, detailOverride: String? = nil) {
         sendToast?.orderOut(nil)
 
         let size = NSSize(width: 390, height: 168)
@@ -1143,11 +1224,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         icon.layer?.cornerRadius = 19
         icon.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSTextField(labelWithString: failures == 0 ? "消息发送成功" : "消息发送未完成")
+        let title = NSTextField(labelWithString: titleOverride ?? (failures == 0 ? "消息发送成功" : "消息发送未完成"))
         title.font = .systemFont(ofSize: 18, weight: .bold)
         title.textColor = .labelColor
 
-        let recipient = NSTextField(wrappingLabelWithString: failures == 0 ? "已发送给：\(recipients)" : "\(failures) 台电脑未确认收到")
+        let recipient = NSTextField(wrappingLabelWithString: detailOverride ?? (failures == 0 ? "已发送给：\(recipients)" : "\(failures) 台电脑未确认收到"))
         recipient.font = .systemFont(ofSize: 13, weight: .medium)
         recipient.textColor = .secondaryLabelColor
         recipient.maximumNumberOfLines = 2

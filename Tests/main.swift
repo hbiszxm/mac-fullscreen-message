@@ -9,10 +9,17 @@ var didStartSend = false
 var receiverPeerID: String?
 var peerWasRemoved = false
 var peerCameBack = false
+var responseReceived = false
 
 receiver.onMessage = { message in
     receivedText = message.text
     receivedKind = message.kind
+    if message.kind == "alert" {
+        receiver.respond(to: message, accepted: true) { _ in }
+    }
+}
+sender.onMessage = { message in
+    if message.kind == "accepted", message.relatedMessageID != nil { responseReceived = true }
 }
 sender.onPeersChanged = { peers in
     if let receiverPeerID {
@@ -28,7 +35,7 @@ sender.onPeersChanged = { peers in
 receiver.start()
 sender.start()
 let deadline = Date().addingTimeInterval(12)
-while Date() < deadline, (sendResult == nil || receivedText == nil) {
+while Date() < deadline, (sendResult == nil || receivedText == nil || !responseReceived) {
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
 }
 guard receivedText == "自动发现、发送、确认测试" else {
@@ -38,6 +45,10 @@ guard receivedText == "自动发现、发送、确认测试" else {
 guard case .success? = sendResult else {
     fputs("发送端未收到确认\n", stderr)
     exit(2)
+}
+guard responseReceived else {
+    fputs("接收方处理结果未返回发送方\n", stderr)
+    exit(7)
 }
 
 receivedText = nil
@@ -79,4 +90,4 @@ guard peerCameBack else {
     fputs("接收端重启后未重新上线\n", stderr)
     exit(5)
 }
-print("自动发现、全屏消息、临时聊天、确认、移除和重启重新上线均成功")
+print("自动发现、全屏消息、临时聊天、处理结果返回、确认、移除和重启重新上线均成功")
