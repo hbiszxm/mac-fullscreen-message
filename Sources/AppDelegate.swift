@@ -288,8 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         if let selected = menuSelectedPeerID, !peers.contains(where: { $0.id == selected }) {
             menuSelectedPeerID = nil
         }
-        let selectedName = menuSelectedPeerID.flatMap { id in peers.first(where: { $0.id == id })?.name }
-        let root = NSMenuItem(title: "自定义消息接收：\(selectedName ?? "所有电脑")", action: nil, keyEquivalent: "")
+        let root = NSMenuItem(title: "选择自定义消息接收电脑", action: nil, keyEquivalent: "")
         let submenu = NSMenu(title: "选择接收电脑")
         let all = NSMenuItem(title: "所有电脑", action: #selector(selectInlineMessageTarget(_:)), keyEquivalent: "")
         all.target = self
@@ -316,6 +315,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc private func selectInlineMessageTarget(_ sender: NSMenuItem) {
         menuSelectedPeerID = sender.representedObject as? String
         rebuildStatusMenu()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            self?.statusItem.button?.performClick(nil)
+        }
     }
 
     private func addInlineMessageComposer() {
@@ -343,9 +345,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
         menuMessageView.menu = editMenu
         let messageScroll = NSScrollView()
-        messageScroll.borderType = .bezelBorder
+        messageScroll.borderType = .noBorder
         messageScroll.hasVerticalScroller = true
         messageScroll.documentView = menuMessageView
+        messageScroll.wantsLayer = true
+        messageScroll.layer?.cornerRadius = 10
+        messageScroll.layer?.borderWidth = 1
+        messageScroll.layer?.borderColor = NSColor.separatorColor.cgColor
+        messageScroll.layer?.masksToBounds = true
+        messageScroll.backgroundColor = .controlBackgroundColor
         messageScroll.translatesAutoresizingMaskIntoConstraints = false
         messageScroll.heightAnchor.constraint(equalToConstant: 62).isActive = true
         menuSendButton.target = self
@@ -358,8 +366,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         menuFavoriteButton.controlSize = .small
 
         let selectedName = menuSelectedPeerID.flatMap { id in peers.first(where: { $0.id == id })?.name }
-        let title = NSTextField(labelWithString: "发送给：\(selectedName ?? "所有电脑")")
+        let title = NSTextField(wrappingLabelWithString: "发送给：\(selectedName ?? "所有电脑")")
         title.font = .systemFont(ofSize: 13, weight: .semibold)
+        title.maximumNumberOfLines = 2
+        title.lineBreakMode = .byWordWrapping
+        title.toolTip = selectedName ?? "所有电脑"
         let buttonRow = NSStackView(views: [menuFavoriteButton, menuSendButton])
         buttonRow.orientation = .horizontal
         buttonRow.alignment = .centerY
@@ -368,7 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         inputRow.orientation = .horizontal
         inputRow.alignment = .centerY
         inputRow.spacing = 10
-        messageScroll.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        messageScroll.widthAnchor.constraint(equalToConstant: 240).isActive = true
         if menuSendWidthConstraint == nil {
             menuSendWidthConstraint = menuSendButton.widthAnchor.constraint(equalToConstant: 64)
             menuSendWidthConstraint?.isActive = true
@@ -381,7 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.orientation = .vertical
         stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 96))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 430, height: 124))
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
