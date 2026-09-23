@@ -109,6 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var peers: [Peer] = []
     private var alerts: [FullScreenAlertController] = []
     private var sendToast: NSPanel?
+    private var hasUnreadChat = false
+    private var transientStatusMark: String?
     private var lastStatus = "正在启动…"
     private var activity: NSObjectProtocol?
     private let nameField = NSTextField()
@@ -126,6 +128,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let chatSendButton = NSButton(title: "发送聊天", target: nil, action: nil)
     private let chatPrivacyView = PrivacyChatView()
     private let chatUnreadDot = UnreadDotView()
+    private let menuMessageField = NSTextField()
+    private let menuPeerPopup = NSPopUpButton()
+    private let menuSendButton = NSButton(title: "发送", target: nil, action: nil)
+    private var menuSendWidthConstraint: NSLayoutConstraint?
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
 
     private var customMessages: [String] {
@@ -151,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     private func createStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "上班"
+        updateStatusItemTitle()
         statusItem.button?.font = .systemFont(ofSize: 13, weight: .bold)
         statusItem.button?.toolTip = "全屏消息"
         statusItem.menu = statusMenu
@@ -199,9 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
 
         statusMenu.addItem(.separator())
-        let custom = NSMenuItem(title: "发送自定义消息…", action: #selector(showComposer), keyEquivalent: "")
-        custom.target = self
-        statusMenu.addItem(custom)
+        addInlineMessageComposer()
         if !customMessages.isEmpty {
             let deleteRoot = NSMenuItem(title: "删除快捷消息", action: nil, keyEquivalent: "")
             let deleteMenu = NSMenu(title: "删除快捷消息")
@@ -241,6 +245,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let quit = NSMenuItem(title: "退出全屏消息", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         statusMenu.addItem(quit)
+    }
+
+    private func addInlineMessageComposer() {
+        menuPeerPopup.removeAllItems()
+        if peers.isEmpty {
+            menuPeerPopup.addItem(withTitle: "暂无在线电脑")
+            menuPeerPopup.isEnabled = false
+            menuSendButton.isEnabled = false
+        } else {
+            menuPeerPopup.addItem(withTitle: "所有电脑（\(peers.count) 台）")
+            peers.forEach { menuPeerPopup.addItem(withTitle: $0.name) }
+            menuPeerPopup.isEnabled = true
+            menuSendButton.isEnabled = true
+        }
+        menuPeerPopup.controlSize = .small
+        menuMessageField.placeholderString = "输入自定义全屏消息"
+        menuMessageField.target = self
+        menuMessageField.action = #selector(sendInlineMenuMessage)
+        menuSendButton.target = self
+        menuSendButton.action = #selector(sendInlineMenuMessage)
+        menuSendButton.bezelStyle = .rounded
+        menuSendButton.controlSize = .small
+
+        let title = NSTextField(labelWithString: "自定义全屏消息")
+        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        let topRow = NSStackView(views: [title, menuPeerPopup])
+        topRow.orientation = .horizontal
+        topRow.alignment = .centerY
+        topRow.spacing = 10
+        title.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        menuPeerPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let inputRow = NSStackView(views: [menuMessageField, menuSendButton])
+        inputRow.orientation = .horizontal
+        inputRow.spacing = 8
+        menuMessageField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        if menuSendWidthConstraint == nil {
+            menuSendWidthConstraint = menuSendButton.widthAnchor.constraint(equalToConstant: 64)
+            menuSendWidthConstraint?.isActive = true
+        }
+        let stack = NSStackView(views: [topRow, inputRow])
+        stack.orientation = .vertical
+        stack.spacing = 7
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 410, height: 76))
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            topRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            inputRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+        let item = NSMenuItem()
+        item.view = container
+        statusMenu.addItem(item)
+    }
+
+    @objc private func sendInlineMenuMessage() {
+        let text = menuMessageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let index = menuPeerPopup.indexOfSelectedItem
+        guard !text.isEmpty, !peers.isEmpty, index >= 0 else { NSSound.beep(); return }
+        let targets: [Peer]
+        if index == 0 {
+            targets = peers
+        } else {
+            let peerIndex = index - 1
+            guard peers.indices.contains(peerIndex) else { NSSound.beep(); return }
+            targets = [peers[peerIndex]]
+        }
+        menuMessageField.stringValue = ""
+        statusMenu.cancelTracking()
+        send(text, to: targets)
     }
 
     private func createComposerWindow() {
@@ -348,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         chatUnreadDot.translatesAutoresizingMaskIntoConstraints = false
         chatUnreadDot.widthAnchor.constraint(equalToConstant: 10).isActive = true
         chatUnreadDot.heightAnchor.constraint(equalToConstant: 10).isActive = true
-        chatPrivacyView.onInteraction = { [weak self] in self?.chatUnreadDot.clear() }
+        chatPrivacyView.onInteraction = { [weak self] in self?.clearUnreadChat() }
         let chatInputRow = NSStackView(views: [chatInputField, chatSendButton])
         chatInputRow.orientation = .horizontal
         chatInputRow.spacing = 10
@@ -546,6 +623,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         appendChatLine(sender: message.sender, text: message.text, incoming: true)
         setStatus("收到 \(message.sender) 的聊天消息")
         chatUnreadDot.startBlinking()
+        hasUnreadChat = true
+        updateStatusItemTitle()
+    }
+
+    private func clearUnreadChat() {
+        chatUnreadDot.clear()
+        hasUnreadChat = false
+        updateStatusItemTitle()
     }
 
     private func appendChatLine(sender: String, text: String, incoming: Bool) {
@@ -761,13 +846,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private func setStatus(_ text: String, success: Bool? = nil) {
         lastStatus = text
         statusLabel.stringValue = text
-        if success == true { statusItem.button?.title = "上班 ✓" }
-        if success == false { statusItem.button?.title = "上班 !" }
+        if success == true { transientStatusMark = "✓" }
+        if success == false { transientStatusMark = "!" }
+        updateStatusItemTitle()
         rebuildStatusMenu()
         if success != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-                self?.statusItem.button?.title = "上班"
+                self?.transientStatusMark = nil
+                self?.updateStatusItemTitle()
             }
         }
+    }
+
+    private func updateStatusItemTitle() {
+        var marks: [String] = []
+        if hasUnreadChat { marks.append("●") }
+        if let transientStatusMark { marks.append(transientStatusMark) }
+        statusItem.button?.title = marks.isEmpty ? "上班" : "上班 \(marks.joined(separator: " "))"
     }
 }
