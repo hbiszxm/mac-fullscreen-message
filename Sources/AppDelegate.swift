@@ -105,6 +105,10 @@ private final class QuickMessageButton: NSButton {
     var messageText = ""
 }
 
+private final class PayloadButton: NSButton {
+    var payload = ""
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var statusItem: NSStatusItem!
     private let statusMenu = NSMenu()
@@ -325,62 +329,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let customLabel = NSTextField(labelWithString: "自定义消息")
         customLabel.font = .systemFont(ofSize: 13, weight: .semibold)
 
-        let more = NSPopUpButton(frame: .zero, pullsDown: true)
-        more.addItem(withTitle: "更多")
-        for (title, action, object) in [
-            ("检查更新…", #selector(checkForUpdates), nil),
-            ("复制安装/更新命令", #selector(copyMenuCommand(_:)), installCommand),
-            ("复制重启命令", #selector(copyMenuCommand(_:)), restartCommandField.stringValue),
-            ("复制卸载命令", #selector(copyMenuCommand(_:)), uninstallCommandField.stringValue)
-        ] as [(String, Selector, String?)] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            item.representedObject = object
-            more.menu?.addItem(item)
+        let moreLabel = NSTextField(labelWithString: "更多")
+        moreLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let moreStack = NSStackView()
+        moreStack.orientation = .vertical
+        moreStack.spacing = 6
+        func addMoreButton(_ title: String, action: Selector) {
+            let button = NSButton(title: title, target: self, action: action)
+            button.bezelStyle = .rounded
+            button.alignment = .left
+            moreStack.addArrangedSubview(button)
         }
-        let history = NSMenuItem(title: "查看消息历史", action: #selector(showHistory), keyEquivalent: "")
-        history.target = self
-        more.menu?.addItem(history)
-        more.menu?.addItem(.separator())
-        let login = NSMenuItem(title: "开机自动运行", action: #selector(toggleLoginItem(_:)), keyEquivalent: "")
-        login.target = self
+        func addPayloadButton(_ title: String, payload: String, action: Selector) {
+            let button = PayloadButton(title: title, target: self, action: action)
+            button.payload = payload
+            button.bezelStyle = .rounded
+            button.alignment = .left
+            moreStack.addArrangedSubview(button)
+        }
+        addMoreButton("检查更新…", action: #selector(checkForUpdates))
+        addMoreButton("查看消息历史", action: #selector(showHistory))
+        let login = NSButton(checkboxWithTitle: "开机自动运行", target: self, action: #selector(toggleLoginItem(_:)))
         if #available(macOS 13.0, *) { login.state = SMAppService.mainApp.status == .enabled ? .on : .off }
-        more.menu?.addItem(login)
-        if !peers.isEmpty {
-            let removeRoot = NSMenuItem(title: "移除电脑", action: nil, keyEquivalent: "")
-            let removeMenu = NSMenu(title: "移除电脑")
-            for peer in peers {
-                let item = NSMenuItem(title: peer.name, action: #selector(removePeer(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = peer.id
-                removeMenu.addItem(item)
-            }
-            removeRoot.submenu = removeMenu
-            more.menu?.addItem(removeRoot)
+        moreStack.addArrangedSubview(login)
+        addPayloadButton("复制安装/更新命令", payload: installCommand, action: #selector(copyPayloadCommand(_:)))
+        addPayloadButton("复制重启命令", payload: restartCommandField.stringValue, action: #selector(copyPayloadCommand(_:)))
+        addPayloadButton("复制卸载命令", payload: uninstallCommandField.stringValue, action: #selector(copyPayloadCommand(_:)))
+        for peer in peers {
+            addPayloadButton("移除电脑：\(peer.name)", payload: peer.id, action: #selector(removePeerButton(_:)))
         }
-        if !customMessages.isEmpty {
-            let deleteRoot = NSMenuItem(title: "删除快捷消息", action: nil, keyEquivalent: "")
-            let deleteMenu = NSMenu(title: "删除快捷消息")
-            for text in customMessages {
-                let item = NSMenuItem(title: text, action: #selector(deleteCustomMessage(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = text
-                deleteMenu.addItem(item)
-            }
-            deleteRoot.submenu = deleteMenu
-            more.menu?.addItem(deleteRoot)
+        for text in customMessages {
+            addPayloadButton("删除快捷消息：\(text)", payload: text, action: #selector(deleteCustomMessageButton(_:)))
         }
-        more.menu?.addItem(.separator())
-        let quit = NSMenuItem(title: "退出全屏消息", action: #selector(quitApp), keyEquivalent: "q")
-        quit.target = self
-        more.menu?.addItem(quit)
+        addMoreButton("退出全屏消息", action: #selector(quitApp))
 
-        let stack = NSStackView(views: [openButton, online, state, targetRow, quickLabel, quickStack, customLabel, messageScroll, actionRow, more])
+        let stack = NSStackView(views: [openButton, online, state, targetRow, quickLabel, quickStack, customLabel, messageScroll, actionRow, moreLabel, moreStack])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let height = min(700, 460 + (defaultMessages.count + customMessages.count) * 34)
+        let moreItemCount = 7 + peers.count + customMessages.count
+        let height = min(900, 470 + (defaultMessages.count + customMessages.count + moreItemCount) * 34)
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: height))
         container.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -392,7 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             messageScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             openButton.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            more.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            moreStack.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
         let controller = NSViewController()
         controller.view = container
@@ -479,6 +468,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         pasteboard.clearContents()
         pasteboard.setString(command, forType: .string)
         setStatus("命令已复制", success: true)
+    }
+
+    @objc private func copyPayloadCommand(_ sender: PayloadButton) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(sender.payload, forType: .string)
+        setStatus("命令已复制", success: true)
+        rebuildStatusPopover()
+    }
+
+    @objc private func removePeerButton(_ sender: PayloadButton) {
+        guard let peer = peers.first(where: { $0.id == sender.payload }) else { return }
+        messenger.dismissPeer(id: peer.id)
+        setStatus("已移除 \(peer.name)，对方重启后会重新上线", success: true)
+        rebuildStatusPopover()
+    }
+
+    @objc private func deleteCustomMessageButton(_ sender: PayloadButton) {
+        customMessages = customMessages.filter { $0 != sender.payload }
+        setStatus("已删除快捷消息", success: true)
+        rebuildStatusPopover()
     }
 
     private func addCustomMessageTargetMenu() {
