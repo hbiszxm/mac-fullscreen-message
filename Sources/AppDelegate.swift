@@ -132,8 +132,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let chatUnreadDot = UnreadDotView()
     private let menuMessageField = NSTextField()
     private let menuSendButton = NSButton(title: "发送", target: nil, action: nil)
+    private let menuFavoriteButton = NSButton(title: "收藏", target: nil, action: nil)
     private var menuSendWidthConstraint: NSLayoutConstraint?
+    private var menuFavoriteWidthConstraint: NSLayoutConstraint?
     private var menuSelectedPeerID: String?
+    private let installCommand = "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh?cache=$(date +%s)\" | /bin/bash"
     private let defaultMessages = ["上班", "吸烟", "暗棋"]
 
     private var customMessages: [String] {
@@ -233,9 +236,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             removeRoot.submenu = removeMenu
             statusMenu.addItem(removeRoot)
         }
+        statusMenu.addItem(.separator())
+        addMoreMenu()
+    }
+
+    private func addMoreMenu() {
+        let root = NSMenuItem(title: "更多", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "更多")
+
         let update = NSMenuItem(title: "检查更新…", action: #selector(checkForUpdates), keyEquivalent: "")
         update.target = self
-        statusMenu.addItem(update)
+        submenu.addItem(update)
         let login = NSMenuItem(title: "开机自动运行", action: #selector(toggleLoginItem(_:)), keyEquivalent: "")
         login.target = self
         if #available(macOS 13.0, *) {
@@ -243,11 +254,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             login.state = state
             homeLoginCheckbox.state = state
         }
-        statusMenu.addItem(login)
-        statusMenu.addItem(.separator())
+        submenu.addItem(login)
+        submenu.addItem(.separator())
+
+        let commands: [(String, String)] = [
+            ("复制安装/更新命令", installCommand),
+            ("复制重启命令", restartCommandField.stringValue),
+            ("复制卸载命令", uninstallCommandField.stringValue)
+        ]
+        for (title, command) in commands {
+            let item = NSMenuItem(title: title, action: #selector(copyMenuCommand(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = command
+            submenu.addItem(item)
+        }
+        submenu.addItem(.separator())
         let quit = NSMenuItem(title: "退出全屏消息", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
-        statusMenu.addItem(quit)
+        submenu.addItem(quit)
+        root.submenu = submenu
+        statusMenu.addItem(root)
+    }
+
+    @objc private func copyMenuCommand(_ sender: NSMenuItem) {
+        guard let command = sender.representedObject as? String else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(command, forType: .string)
+        setStatus("命令已复制", success: true)
     }
 
     private func addCustomMessageTargetMenu() {
@@ -297,17 +331,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         menuSendButton.action = #selector(sendInlineMenuMessage)
         menuSendButton.bezelStyle = .rounded
         menuSendButton.controlSize = .small
+        menuFavoriteButton.target = self
+        menuFavoriteButton.action = #selector(favoriteInlineMenuMessage)
+        menuFavoriteButton.bezelStyle = .rounded
+        menuFavoriteButton.controlSize = .small
 
         let selectedName = menuSelectedPeerID.flatMap { id in peers.first(where: { $0.id == id })?.name }
         let title = NSTextField(labelWithString: "发送给：\(selectedName ?? "所有电脑")")
         title.font = .systemFont(ofSize: 13, weight: .semibold)
-        let inputRow = NSStackView(views: [menuMessageField, menuSendButton])
+        let inputRow = NSStackView(views: [menuMessageField, menuFavoriteButton, menuSendButton])
         inputRow.orientation = .horizontal
         inputRow.spacing = 8
         menuMessageField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         if menuSendWidthConstraint == nil {
             menuSendWidthConstraint = menuSendButton.widthAnchor.constraint(equalToConstant: 64)
             menuSendWidthConstraint?.isActive = true
+        }
+        if menuFavoriteWidthConstraint == nil {
+            menuFavoriteWidthConstraint = menuFavoriteButton.widthAnchor.constraint(equalToConstant: 64)
+            menuFavoriteWidthConstraint?.isActive = true
         }
         let stack = NSStackView(views: [title, inputRow])
         stack.orientation = .vertical
@@ -335,6 +377,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         menuMessageField.stringValue = ""
         statusMenu.cancelTracking()
         send(text, to: targets)
+    }
+
+    @objc private func favoriteInlineMenuMessage() {
+        let text = menuMessageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard addCustomMessage(text) else { return }
+        menuMessageField.stringValue = ""
+        statusMenu.cancelTracking()
+        setStatus("已收藏到快捷消息", success: true)
     }
 
     private func createComposerWindow() {
@@ -606,17 +656,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     @objc private func saveCustomMessage() {
         let text = messageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { setStatus("请先输入消息内容", success: false); NSSound.beep(); return }
+        guard addCustomMessage(text) else { return }
+        setStatus("已添加到快捷列表", success: true)
+    }
+
+    private func addCustomMessage(_ text: String) -> Bool {
+        guard !text.isEmpty else { setStatus("请先输入消息内容", success: false); NSSound.beep(); return false }
         guard !defaultMessages.contains(text), !customMessages.contains(text) else {
             setStatus("快捷列表中已经有这条消息", success: false)
             NSSound.beep()
-            return
+            return false
         }
         var messages = customMessages
         messages.append(text)
         customMessages = messages
-        rebuildStatusMenu()
-        setStatus("已添加到快捷列表", success: true)
+        return true
     }
 
     @objc private func sendChatMessage() {
