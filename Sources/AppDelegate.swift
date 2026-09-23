@@ -101,6 +101,10 @@ private final class SendChoice: NSObject {
     init(text: String, peerID: String?) { self.text = text; self.peerID = peerID }
 }
 
+private final class QuickMessageButton: NSButton {
+    var messageText = ""
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var statusItem: NSStatusItem!
     private let statusMenu = NSMenu()
@@ -134,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private let menuSendButton = NSButton(title: "发送", target: nil, action: nil)
     private let menuFavoriteButton = NSButton(title: "收藏", target: nil, action: nil)
     private let customMessagePopover = NSPopover()
+    private let statusPopover = NSPopover()
     private let popoverPeerPopup = NSPopUpButton()
     private var menuSelectedPeerID: String?
     private let installCommand = "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/install-latest.sh?cache=$(date +%s)\" | /bin/bash"
@@ -165,11 +170,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         updateStatusItemTitle()
         statusItem.button?.font = .systemFont(ofSize: 13, weight: .bold)
         statusItem.button?.toolTip = "全屏消息"
-        statusItem.menu = statusMenu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(toggleStatusPopover)
         rebuildStatusMenu()
     }
 
     private func rebuildStatusMenu() {
+        if statusItem.menu == nil {
+            rebuildStatusPopover()
+            return
+        }
         statusMenu.removeAllItems()
         let home = NSMenuItem(title: "打开客户端", action: #selector(showHome), keyEquivalent: "")
         home.target = self
@@ -226,6 +236,183 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
         statusMenu.addItem(.separator())
         addMoreMenu()
+    }
+
+    @objc private func toggleStatusPopover() {
+        guard let button = statusItem.button else { return }
+        if statusPopover.isShown { statusPopover.performClose(nil); return }
+        rebuildStatusPopover()
+        NSApp.activate(ignoringOtherApps: true)
+        statusPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self else { return }
+            self.statusPopover.contentViewController?.view.window?.makeFirstResponder(self.menuMessageView)
+        }
+    }
+
+    private func rebuildStatusPopover() {
+        statusPopover.behavior = .transient
+        statusPopover.animates = true
+        let openButton = NSButton(title: "打开客户端", target: self, action: #selector(openClientFromPopover))
+        openButton.bezelStyle = .rounded
+        openButton.font = .systemFont(ofSize: 15, weight: .semibold)
+        let online = NSTextField(labelWithString: peers.isEmpty ? "未发现其他电脑" : "在线电脑：\(peers.count) 台")
+        online.textColor = .secondaryLabelColor
+        let state = NSTextField(labelWithString: "状态：\(lastStatus)")
+        state.textColor = .secondaryLabelColor
+
+        popoverPeerPopup.removeAllItems()
+        popoverPeerPopup.addItem(withTitle: peers.isEmpty ? "暂无在线电脑" : "所有电脑（\(peers.count) 台）")
+        peers.forEach { popoverPeerPopup.addItem(withTitle: $0.name) }
+        popoverPeerPopup.isEnabled = !peers.isEmpty
+        popoverPeerPopup.target = self
+        popoverPeerPopup.action = #selector(selectPopoverMessageTarget)
+        if let selectedID = menuSelectedPeerID, let index = peers.firstIndex(where: { $0.id == selectedID }) {
+            popoverPeerPopup.selectItem(at: index + 1)
+        }
+        let targetLabel = NSTextField(labelWithString: "接收电脑")
+        targetLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let targetRow = NSStackView(views: [targetLabel, popoverPeerPopup])
+        targetRow.orientation = .horizontal
+        targetRow.alignment = .centerY
+        targetRow.spacing = 10
+        popoverPeerPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let quickLabel = NSTextField(labelWithString: "快捷消息")
+        quickLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let quickStack = NSStackView()
+        quickStack.orientation = .vertical
+        quickStack.spacing = 6
+        for text in defaultMessages + customMessages {
+            let button = QuickMessageButton(title: text, target: self, action: #selector(sendQuickMessageFromPopover(_:)))
+            button.messageText = text
+            button.bezelStyle = .rounded
+            button.alignment = .left
+            button.isEnabled = !peers.isEmpty
+            quickStack.addArrangedSubview(button)
+        }
+
+        configurePopoverMessageEditorIfNeeded()
+        let messageScroll = NSScrollView()
+        messageScroll.borderType = .noBorder
+        messageScroll.hasVerticalScroller = true
+        messageScroll.documentView = menuMessageView
+        messageScroll.wantsLayer = true
+        messageScroll.layer?.cornerRadius = 10
+        messageScroll.layer?.borderWidth = 1
+        messageScroll.layer?.borderColor = NSColor.separatorColor.cgColor
+        messageScroll.layer?.masksToBounds = true
+        messageScroll.backgroundColor = .controlBackgroundColor
+        messageScroll.heightAnchor.constraint(equalToConstant: 90).isActive = true
+        menuFavoriteButton.target = self
+        menuFavoriteButton.action = #selector(favoriteInlineMenuMessage)
+        menuFavoriteButton.bezelStyle = .rounded
+        menuSendButton.target = self
+        menuSendButton.action = #selector(sendInlineMenuMessage)
+        menuSendButton.bezelStyle = .rounded
+        menuSendButton.isEnabled = !peers.isEmpty
+        let actionRow = NSStackView(views: [menuFavoriteButton, menuSendButton])
+        actionRow.orientation = .horizontal
+        actionRow.distribution = .fillEqually
+        actionRow.spacing = 8
+        let customLabel = NSTextField(labelWithString: "自定义消息")
+        customLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let more = NSPopUpButton(frame: .zero, pullsDown: true)
+        more.addItem(withTitle: "更多")
+        for (title, action, object) in [
+            ("检查更新…", #selector(checkForUpdates), nil),
+            ("复制安装/更新命令", #selector(copyMenuCommand(_:)), installCommand),
+            ("复制重启命令", #selector(copyMenuCommand(_:)), restartCommandField.stringValue),
+            ("复制卸载命令", #selector(copyMenuCommand(_:)), uninstallCommandField.stringValue)
+        ] as [(String, Selector, String?)] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = object
+            more.menu?.addItem(item)
+        }
+        more.menu?.addItem(.separator())
+        let login = NSMenuItem(title: "开机自动运行", action: #selector(toggleLoginItem(_:)), keyEquivalent: "")
+        login.target = self
+        if #available(macOS 13.0, *) { login.state = SMAppService.mainApp.status == .enabled ? .on : .off }
+        more.menu?.addItem(login)
+        if !peers.isEmpty {
+            let removeRoot = NSMenuItem(title: "移除电脑", action: nil, keyEquivalent: "")
+            let removeMenu = NSMenu(title: "移除电脑")
+            for peer in peers {
+                let item = NSMenuItem(title: peer.name, action: #selector(removePeer(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = peer.id
+                removeMenu.addItem(item)
+            }
+            removeRoot.submenu = removeMenu
+            more.menu?.addItem(removeRoot)
+        }
+        if !customMessages.isEmpty {
+            let deleteRoot = NSMenuItem(title: "删除快捷消息", action: nil, keyEquivalent: "")
+            let deleteMenu = NSMenu(title: "删除快捷消息")
+            for text in customMessages {
+                let item = NSMenuItem(title: text, action: #selector(deleteCustomMessage(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = text
+                deleteMenu.addItem(item)
+            }
+            deleteRoot.submenu = deleteMenu
+            more.menu?.addItem(deleteRoot)
+        }
+        more.menu?.addItem(.separator())
+        let quit = NSMenuItem(title: "退出全屏消息", action: #selector(quitApp), keyEquivalent: "q")
+        quit.target = self
+        more.menu?.addItem(quit)
+
+        let stack = NSStackView(views: [openButton, online, state, targetRow, quickLabel, quickStack, customLabel, messageScroll, actionRow, more])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let height = min(700, 460 + (defaultMessages.count + customMessages.count) * 34)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: height))
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
+            targetRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            quickStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            messageScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            openButton.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            more.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+        let controller = NSViewController()
+        controller.view = container
+        statusPopover.contentViewController = controller
+        statusPopover.contentSize = container.frame.size
+    }
+
+    private func configurePopoverMessageEditorIfNeeded() {
+        menuMessageView.font = .systemFont(ofSize: 14)
+        menuMessageView.isRichText = false
+        menuMessageView.textContainerInset = NSSize(width: 8, height: 7)
+        menuMessageView.textContainer?.widthTracksTextView = true
+        if menuMessageView.menu == nil {
+            let editMenu = NSMenu(title: "编辑")
+            for (title, action, key) in [("剪切", #selector(NSText.cut(_:)), "x"), ("复制", #selector(NSText.copy(_:)), "c"), ("粘贴", #selector(NSText.paste(_:)), "v"), ("全选", #selector(NSText.selectAll(_:)), "a")] {
+                editMenu.addItem(NSMenuItem(title: title, action: action, keyEquivalent: key))
+            }
+            menuMessageView.menu = editMenu
+        }
+    }
+
+    @objc private func openClientFromPopover() {
+        statusPopover.performClose(nil)
+        showHome()
+    }
+
+    @objc private func sendQuickMessageFromPopover(_ sender: QuickMessageButton) {
+        let targets = menuSelectedPeerID == nil ? peers : peers.filter { $0.id == menuSelectedPeerID }
+        statusPopover.performClose(nil)
+        send(sender.messageText, to: targets)
     }
 
     private func addMoreMenu() {
@@ -437,7 +624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         } else if peers.indices.contains(index - 1) {
             menuSelectedPeerID = peers[index - 1].id
         }
-        rebuildStatusMenu()
+        if !statusPopover.isShown { rebuildStatusMenu() }
     }
 
     @objc private func sendInlineMenuMessage() {
@@ -446,7 +633,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let targets = menuSelectedPeerID == nil ? peers : peers.filter { $0.id == menuSelectedPeerID }
         guard !targets.isEmpty else { NSSound.beep(); return }
         menuMessageView.string = ""
-        customMessagePopover.performClose(nil)
+        statusPopover.performClose(nil)
         send(text, to: targets)
     }
 
@@ -454,7 +641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let text = menuMessageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard addCustomMessage(text) else { return }
         menuMessageView.string = ""
-        customMessagePopover.performClose(nil)
+        statusPopover.performClose(nil)
         setStatus("已收藏到快捷消息", success: true)
     }
 
