@@ -52,6 +52,42 @@ private final class AlertWindow: NSWindow {
     }
 }
 
+private final class ResponseButton: NSButton {
+    private let fillColor: NSColor
+
+    init(title: String, color: NSColor, target: AnyObject?, action: Selector?) {
+        self.fillColor = color
+        super.init(frame: .zero)
+        self.title = title
+        self.target = target
+        self.action = action
+        isBordered = false
+        focusRingType = .none
+        font = .systemFont(ofSize: 19, weight: .bold)
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .foregroundColor: NSColor.white,
+                .font: font as Any
+            ]
+        )
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let color = isHighlighted ? fillColor.blended(withFraction: 0.18, of: .black) ?? fillColor : fillColor
+        color.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12).fill()
+
+        let textSize = attributedTitle.size()
+        attributedTitle.draw(at: NSPoint(
+            x: (bounds.width - textSize.width) / 2,
+            y: (bounds.height - textSize.height) / 2
+        ))
+    }
+}
+
 final class FullScreenAlertController: NSWindowController {
     private var screenWindows: [NSWindow] = []
     private var backgrounds: [AlertBackgroundView] = []
@@ -143,22 +179,8 @@ final class FullScreenAlertController: NSWindowController {
         hint.textColor = NSColor.white.withAlphaComponent(0.72)
         hint.alignment = .center
 
-        let accepted = NSButton(title: "收到", target: self, action: #selector(acceptMessage))
-        accepted.isBordered = false
-        accepted.wantsLayer = true
-        accepted.layer?.backgroundColor = NSColor.systemGreen.cgColor
-        accepted.layer?.cornerRadius = 11
-        accepted.contentTintColor = .white
-        accepted.controlSize = .large
-        accepted.font = .systemFont(ofSize: 18, weight: .semibold)
-        let rejected = NSButton(title: "拒绝", target: self, action: #selector(rejectMessage))
-        rejected.isBordered = false
-        rejected.wantsLayer = true
-        rejected.layer?.backgroundColor = NSColor.systemRed.cgColor
-        rejected.layer?.cornerRadius = 11
-        rejected.contentTintColor = .white
-        rejected.controlSize = .large
-        rejected.font = .systemFont(ofSize: 18, weight: .semibold)
+        let accepted = ResponseButton(title: "收到", color: .systemGreen, target: self, action: #selector(acceptMessage))
+        let rejected = ResponseButton(title: "拒绝", color: .systemRed, target: self, action: #selector(rejectMessage))
         let responseRow = NSStackView(views: [accepted, rejected])
         responseRow.orientation = .horizontal
         responseRow.distribution = .fillEqually
