@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var peers: [Peer] = []
     private var alerts: [FullScreenAlertController] = []
     private var sendToast: NSPanel?
-    private var hasUnreadChat = false
+    private var unreadChatCount = 0
     private var transientStatusMark: String?
     private var lastStatus = "正在启动…"
     private var activity: NSObjectProtocol?
@@ -623,13 +623,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         appendChatLine(sender: message.sender, text: message.text, incoming: true)
         setStatus("收到 \(message.sender) 的聊天消息")
         chatUnreadDot.startBlinking()
-        hasUnreadChat = true
+        unreadChatCount += 1
         updateStatusItemTitle()
     }
 
     private func clearUnreadChat() {
         chatUnreadDot.clear()
-        hasUnreadChat = false
+        unreadChatCount = 0
         updateStatusItemTitle()
     }
 
@@ -860,7 +860,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     private func updateStatusItemTitle() {
         var marks: [String] = []
-        if hasUnreadChat { marks.append("●") }
+        if unreadChatCount > 0 { marks.append("● \(unreadChatCount)") }
         if let transientStatusMark { marks.append(transientStatusMark) }
         statusItem.button?.title = marks.isEmpty ? "上班" : "上班 \(marks.joined(separator: " "))"
     }
