@@ -6,6 +6,7 @@ if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
     USER_ID="$(id -u "$CONSOLE_USER")"
     pkill -x FullscreenMessage 2>/dev/null || true
     sleep 1
+    chown -R "$CONSOLE_USER":staff "/Applications/全屏消息.app" || true
     launchctl asuser "$USER_ID" sudo -u "$CONSOLE_USER" open "/Applications/全屏消息.app" || true
 fi
 exit 0

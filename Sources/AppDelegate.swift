@@ -224,18 +224,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             deleteRoot.submenu = deleteMenu
             statusMenu.addItem(deleteRoot)
         }
-        if !peers.isEmpty {
-            let removeRoot = NSMenuItem(title: "移除电脑", action: nil, keyEquivalent: "")
-            let removeMenu = NSMenu(title: "移除电脑")
-            for peer in peers {
-                let item = NSMenuItem(title: peer.name, action: #selector(removePeer(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = peer.id
-                removeMenu.addItem(item)
-            }
-            removeRoot.submenu = removeMenu
-            statusMenu.addItem(removeRoot)
-        }
         statusMenu.addItem(.separator())
         addMoreMenu()
     }
@@ -255,6 +243,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             homeLoginCheckbox.state = state
         }
         submenu.addItem(login)
+        if !peers.isEmpty {
+            let removeRoot = NSMenuItem(title: "移除电脑", action: nil, keyEquivalent: "")
+            let removeMenu = NSMenu(title: "移除电脑")
+            for peer in peers {
+                let item = NSMenuItem(title: peer.name, action: #selector(removePeer(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = peer.id
+                removeMenu.addItem(item)
+            }
+            removeRoot.submenu = removeMenu
+            submenu.addItem(removeRoot)
+        }
         submenu.addItem(.separator())
 
         let commands: [(String, String)] = [
@@ -847,6 +847,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                             switch installResult {
                             case .success:
                                 self.setStatus("更新完成，正在重新启动…", success: true)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
                             case .failure(let error):
                                 self.setStatus("自动更新失败", success: false)
                                 self.showUpdateAlert(title: "自动更新失败", message: error.localizedDescription)

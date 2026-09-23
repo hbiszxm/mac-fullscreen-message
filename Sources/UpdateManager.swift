@@ -124,6 +124,53 @@ enum UpdateManager {
     }
 
     static func installSilently(packageURL: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        let appPath = Bundle.main.bundlePath
+        if FileManager.default.isWritableFile(atPath: appPath) {
+            installWithoutPrivileges(packageURL: packageURL, appPath: appPath, completion: completion)
+            return
+        }
+        installWithAdministratorPrivileges(packageURL: packageURL, completion: completion)
+    }
+
+    private static func installWithoutPrivileges(packageURL: URL, appPath: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let manager = FileManager.default
+            let workDirectory = manager.temporaryDirectory.appendingPathComponent("fullscreen-message-update-\(UUID().uuidString)")
+            let expandedDirectory = workDirectory.appendingPathComponent("expanded")
+            do {
+                try manager.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+                let expand = Process()
+                expand.executableURL = URL(fileURLWithPath: "/usr/sbin/pkgutil")
+                expand.arguments = ["--expand-full", packageURL.path, expandedDirectory.path]
+                try expand.run()
+                expand.waitUntilExit()
+                guard expand.terminationStatus == 0 else {
+                    throw UpdateError.installationFailed("无法解包更新文件。")
+                }
+                guard let enumerator = manager.enumerator(at: expandedDirectory, includingPropertiesForKeys: nil),
+                      let sourceApp = enumerator.compactMap({ $0 as? URL }).first(where: { $0.lastPathComponent == "全屏消息.app" }) else {
+                    throw UpdateError.installationFailed("更新包中没有找到应用程序。")
+                }
+                let helper = Process()
+                helper.executableURL = URL(fileURLWithPath: "/bin/sh")
+                helper.arguments = [
+                    "-c",
+                    "sleep 1; /usr/bin/ditto --norsrc \"$1\" \"$2\" && /usr/bin/open \"$2\"; /bin/rm -rf \"$3\"",
+                    "fullscreen-message-updater",
+                    sourceApp.path,
+                    appPath,
+                    workDirectory.path
+                ]
+                try helper.run()
+                DispatchQueue.main.async { completion(.success(())) }
+            } catch {
+                try? manager.removeItem(at: workDirectory)
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
+    private static func installWithAdministratorPrivileges(packageURL: URL, completion: @escaping (Result<Void, Error>) -> Void) {
         let shellPath = packageURL.path.replacingOccurrences(of: "'", with: "'\\''")
         let command = "/usr/sbin/installer -pkg '\(shellPath)' -target /"
         let appleScriptCommand = command
