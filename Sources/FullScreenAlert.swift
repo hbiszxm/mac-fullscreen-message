@@ -144,11 +144,19 @@ final class FullScreenAlertController: NSWindowController {
         hint.alignment = .center
 
         let accepted = NSButton(title: "收到", target: self, action: #selector(acceptMessage))
-        accepted.bezelStyle = .rounded
+        accepted.isBordered = false
+        accepted.wantsLayer = true
+        accepted.layer?.backgroundColor = NSColor.systemGreen.cgColor
+        accepted.layer?.cornerRadius = 11
+        accepted.contentTintColor = .white
         accepted.controlSize = .large
         accepted.font = .systemFont(ofSize: 18, weight: .semibold)
         let rejected = NSButton(title: "拒绝", target: self, action: #selector(rejectMessage))
-        rejected.bezelStyle = .rounded
+        rejected.isBordered = false
+        rejected.wantsLayer = true
+        rejected.layer?.backgroundColor = NSColor.systemRed.cgColor
+        rejected.layer?.cornerRadius = 11
+        rejected.contentTintColor = .white
         rejected.controlSize = .large
         rejected.font = .systemFont(ofSize: 18, weight: .semibold)
         let responseRow = NSStackView(views: [accepted, rejected])
@@ -156,6 +164,7 @@ final class FullScreenAlertController: NSWindowController {
         responseRow.distribution = .fillEqually
         responseRow.spacing = 16
         responseRow.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        responseRow.heightAnchor.constraint(equalToConstant: 46).isActive = true
 
         let stack = NSStackView(views: [badge, sender, body, time, responseRow, hint])
         stack.orientation = .vertical
