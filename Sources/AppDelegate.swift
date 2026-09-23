@@ -860,7 +860,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     private func updateStatusItemTitle() {
         var marks: [String] = []
-        if unreadChatCount > 0 { marks.append("● \(unreadChatCount)") }
+        if unreadChatCount > 0 { marks.append("\(unreadChatCount)") }
         if let transientStatusMark { marks.append(transientStatusMark) }
         statusItem.button?.title = marks.isEmpty ? "上班" : "上班 \(marks.joined(separator: " "))"
     }
