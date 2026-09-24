@@ -93,11 +93,17 @@ final class FullScreenAlertController: NSWindowController {
     private var backgrounds: [AlertBackgroundView] = []
     private var messagePanels: [NSView] = []
     private let responseHandler: (Bool) -> Void
+    private let dismissHandler: (() -> Void)?
+    private var hasFinished = false
 
-    init(message: WireMessage, responseHandler: @escaping (Bool) -> Void) {
-        self.responseHandler = responseHandler
+    init?(message: WireMessage, responseHandler: @escaping (Bool) -> Void,
+          dismissHandler: (() -> Void)? = nil) {
+        precondition(Thread.isMainThread)
         let screens = NSScreen.screens
-        let primaryScreen = NSScreen.main ?? screens.first!
+        guard let firstScreen = screens.first else { return nil }
+        let primaryScreen = NSScreen.main ?? firstScreen
+        self.responseHandler = responseHandler
+        self.dismissHandler = dismissHandler
         let primaryWindow = Self.makeWindow(for: primaryScreen)
         super.init(window: primaryWindow)
 
@@ -211,13 +217,11 @@ final class FullScreenAlertController: NSWindowController {
     }
 
     @objc private func acceptMessage() {
-        responseHandler(true)
-        dismiss()
+        finish(response: true)
     }
 
     @objc private func rejectMessage() {
-        responseHandler(false)
-        dismiss()
+        finish(response: false)
     }
 
     private static func messageFontSize(for text: String, in size: NSSize) -> CGFloat {
@@ -233,14 +237,21 @@ final class FullScreenAlertController: NSWindowController {
         return max(52, min(156, base * max(0.9, scale)))
     }
 
-    func present() {
+    /// Basic window visibility only; it cannot prove that a person saw it.
+    var isPresented: Bool { !hasFinished && screenWindows.contains { $0.isVisible } }
+
+    @discardableResult
+    func present() -> Bool {
+        precondition(Thread.isMainThread)
+        guard !hasFinished, !screenWindows.isEmpty, !NSScreen.screens.isEmpty else { return false }
         NSApp.activate(ignoringOtherApps: true)
         for window in screenWindows { window.orderFrontRegardless() }
         backgrounds.forEach { $0.startAnimating() }
         for (index, panel) in messagePanels.enumerated() {
             panel.alphaValue = 0
             panel.layer?.transform = CATransform3DMakeScale(0.84, 0.84, 1)
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.06) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.06) { [weak self] in
+                guard let self, !self.hasFinished else { return }
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.48
                     context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -256,11 +267,39 @@ final class FullScreenAlertController: NSWindowController {
             }
         }
         window?.makeKey()
+        return isPresented
     }
 
     @objc private func dismiss() {
-        for window in screenWindows { window.orderOut(nil) }
+        guard !hasFinished else { return }
+        hasFinished = true
+        closeAllWindows()
+        dismissHandler?()
+    }
+
+    /// Session lock/sleep does not acknowledge or dismiss an unread message.
+    func suspend() {
+        precondition(Thread.isMainThread)
+        guard !hasFinished else { return }
+        hasFinished = true
+        closeAllWindows()
+    }
+
+    private func finish(response: Bool) {
+        guard !hasFinished else { return }
+        hasFinished = true
+        closeAllWindows()
+        responseHandler(response)
+    }
+
+    private func closeAllWindows() {
+        for window in screenWindows {
+            window.orderOut(nil)
+            window.close()
+        }
         screenWindows.removeAll()
+        backgrounds.removeAll()
+        messagePanels.removeAll()
         close()
     }
 }

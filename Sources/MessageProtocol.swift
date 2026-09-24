@@ -221,10 +221,17 @@ final class LANMessenger {
                           let message = try? JSONDecoder().decode(WireMessage.self, from: body) else {
                         connection.cancel(); return
                     }
-                    let isNew = self.seenMessageIDs.insert(message.id).inserted
-                    if self.seenMessageIDs.count > 500 { self.seenMessageIDs.removeAll(keepingCapacity: true) }
-                    connection.send(content: Data("OK".utf8), completion: .contentProcessed { _ in connection.cancel() })
-                    if isNew { DispatchQueue.main.async { self.onMessage?(message) } }
+                    DispatchQueue.main.async {
+                        // The receiver persists unread messages synchronously. Confirm delivery
+                        // only after that handler returns, including when a retry arrives first.
+                        if !self.seenMessageIDs.contains(message.id) {
+                            guard let onMessage = self.onMessage else { connection.cancel(); return }
+                            onMessage(message)
+                            if self.seenMessageIDs.count >= 500 { self.seenMessageIDs.removeAll(keepingCapacity: true) }
+                            self.seenMessageIDs.insert(message.id)
+                        }
+                        connection.send(content: Data("OK".utf8), completion: .contentProcessed { _ in connection.cancel() })
+                    }
                 }
             }}
         }

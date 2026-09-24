@@ -131,7 +131,31 @@ final class PopoverEditorFrame: NSView {
 }
 
 final class PopoverMessageTextView: NSTextView {
+    var onSubmit: (() -> Void)?
+    var onFocusChange: ((Bool) -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { onFocusChange?(false) }
+        return accepted
+    }
+
+    override func doCommand(by selector: Selector) {
+        if selector == #selector(insertNewline(_:)), let onSubmit, !hasMarkedText(),
+           NSApp.currentEvent?.modifierFlags.contains(.shift) != true {
+            onSubmit()
+        } else {
+            super.doCommand(by: selector)
+        }
+    }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self else { return false }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard modifiers.contains(.command), !modifiers.contains(.control), !modifiers.contains(.option) else {
             return super.performKeyEquivalent(with: event)
