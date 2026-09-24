@@ -111,6 +111,7 @@ private final class PayloadButton: PopoverButton {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var statusItem: NSStatusItem!
+    private let statusBadgeView = StatusUnreadBadgeView()
     private let statusMenu = NSMenu()
     private var window: NSWindow!
     private var historyWindow: NSWindow!
@@ -119,7 +120,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private var alerts: [FullScreenAlertController] = []
     private var sendToast: NSPanel?
     private var unreadChatCount = 0
-    private var transientStatusMark: String?
     private var lastStatus = "正在启动…"
     private var activity: NSObjectProtocol?
     private var automaticUpdateTimer: Timer?
@@ -182,9 +182,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     private func createStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        updateStatusItemTitle()
-        statusItem.button?.font = .systemFont(ofSize: 13, weight: .bold)
-        statusItem.button?.toolTip = "全屏消息"
+        if let button = statusItem.button {
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleNone
+            statusBadgeView.frame = button.bounds
+            statusBadgeView.autoresizingMask = [.width, .height]
+            statusBadgeView.setAccessibilityElement(false)
+            button.addSubview(statusBadgeView)
+        }
+        updateStatusItemIcon()
         statusItem.button?.target = self
         statusItem.button?.action = #selector(toggleStatusPopover)
         rebuildStatusMenu()
@@ -1180,13 +1186,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         setStatus("收到 \(message.sender) 的聊天消息")
         chatUnreadDot.startBlinking()
         unreadChatCount += 1
-        updateStatusItemTitle()
+        updateStatusItemIcon()
     }
 
     private func clearUnreadChat() {
         chatUnreadDot.clear()
         unreadChatCount = 0
-        updateStatusItemTitle()
+        updateStatusItemIcon()
     }
 
     private func appendChatLine(sender: String, text: String, incoming: Bool) {
@@ -1460,22 +1466,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private func setStatus(_ text: String, success: Bool? = nil) {
         lastStatus = text
         statusLabel.stringValue = text
-        if success == true { transientStatusMark = "✓" }
-        if success == false { transientStatusMark = "!" }
-        updateStatusItemTitle()
+        updateStatusItemIcon()
         rebuildStatusMenu()
-        if success != nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-                self?.transientStatusMark = nil
-                self?.updateStatusItemTitle()
-            }
-        }
     }
 
-    private func updateStatusItemTitle() {
-        var marks: [String] = []
-        if unreadChatCount > 0 { marks.append("\(unreadChatCount)") }
-        if let transientStatusMark { marks.append(transientStatusMark) }
-        statusItem.button?.title = marks.isEmpty ? "上班" : "上班 \(marks.joined(separator: " "))"
+    private func updateStatusItemIcon() {
+        guard let button = statusItem.button else { return }
+        let count = max(0, unreadChatCount)
+        statusItem.length = StatusItemLogo.imageWidth(for: count) + 12
+        button.title = ""
+        button.image = StatusItemLogo.templateImage(unreadCount: count)
+        statusBadgeView.unreadCount = count
+        let description = count > 0 ? "全屏消息，\(count) 条未读消息" : "全屏消息"
+        button.toolTip = "\(description)\n\(lastStatus)"
+        button.setAccessibilityLabel(description)
     }
 }
