@@ -22,6 +22,7 @@ final class InlineChatView: NSView, NSTextViewDelegate {
     private let recipientsLabel = NSTextField(labelWithString: "先选择上方接收电脑")
     private let transcript = NSTextView()
     private let historyScroll = NSScrollView()
+    private lazy var historyHeight = historyScroll.heightAnchor.constraint(equalToConstant: 72)
     private let input = PopoverMessageTextView()
     private let privacy = PrivacyChatView()
     private let sendButton = PopoverButton(title: "发送", target: nil, action: nil)
@@ -65,7 +66,7 @@ final class InlineChatView: NSView, NSTextViewDelegate {
         historyScroll.scrollerStyle = .overlay
         historyScroll.drawsBackground = false
         historyScroll.borderType = .noBorder
-        historyScroll.heightAnchor.constraint(equalToConstant: 72).isActive = true
+        historyHeight.isActive = true
 
         input.isRichText = false
         input.drawsBackground = false
@@ -166,6 +167,7 @@ final class InlineChatView: NSView, NSTextViewDelegate {
         updateSendButton()
     }
     func setUnreadCount(_ count: Int) { unreadLabel.stringValue = count > 0 ? "\(count) 条未读" : "" }
+    func setCompactLayout(_ compact: Bool) { historyHeight.constant = compact ? 48 : 72 }
     func setTranscript(_ value: NSAttributedString) {
         if value.length == 0 {
             transcript.string = "点击下方输入框，开始临时聊天。"

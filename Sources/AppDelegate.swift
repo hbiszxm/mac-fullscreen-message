@@ -295,23 +295,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     }
 
     private func rebuildStatusPopover() {
-        let oldScroll = statusPopover.contentViewController?.view.subviews.first as? NSScrollView
-        let scrollOrigin = oldScroll?.contentView.bounds.origin ?? .zero
         let restoreChatFocus = inlineChat.inputHasFocus
         let restoreEditorFocus = menuMessageView.window?.firstResponder === menuMessageView
         let selection = menuMessageView.selectedRange()
         statusPopover.delegate = self
         statusPopover.behavior = .transient
         statusPopover.animates = true
-        let width: CGFloat = 390
+        var width: CGFloat = 390
         let contentWidth = width - 32
+        let screen = statusItem.button?.window?.screen ?? NSScreen.main
+        let availableHeight = max(280, (screen?.visibleFrame.height ?? 800) - 40)
+        var rowHeights: [NSLayoutConstraint] = []
+        var columns: [(NSStackView, CGFloat)] = []
         func row(_ views: [NSView]) -> NSStackView {
             let row = NSStackView(views: views)
             row.orientation = .horizontal
             row.alignment = .centerY
             row.distribution = .fillEqually
             row.spacing = 8
-            row.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            let height = row.heightAnchor.constraint(equalToConstant: 34)
+            height.isActive = true
+            rowHeights.append(height)
             views.forEach { $0.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true }
             return row
         }
@@ -320,6 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             stack.orientation = .vertical
             stack.alignment = .leading
             stack.spacing = spacing
+            columns.append((stack, spacing))
             views.forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
             return stack
         }
@@ -432,8 +437,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         editor.translatesAutoresizingMaskIntoConstraints = false
         let editorFrame = PopoverEditorFrame()
         editorFrame.addSubview(editor)
+        let editorHeight = editorFrame.heightAnchor.constraint(equalToConstant: 76)
         NSLayoutConstraint.activate([
-            editorFrame.heightAnchor.constraint(equalToConstant: 76),
+            editorHeight,
             editor.leadingAnchor.constraint(equalTo: editorFrame.leadingAnchor, constant: 3),
             editor.trailingAnchor.constraint(equalTo: editorFrame.trailingAnchor, constant: -3),
             editor.topAnchor.constraint(equalTo: editorFrame.topAnchor, constant: 3),
@@ -449,6 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         menuSendButton.isEnabled = !selectedPopoverPeerIDs.isEmpty
         let composer = column([heading("自定义消息"), editorFrame, row([menuFavoriteButton, menuSendButton])])
 
+        inlineChat.setCompactLayout(false)
         inlineChat.onSend = { [weak self] text in
             guard let self else { return }
             let targets = self.peers.filter { self.selectedPopoverPeerIDs.contains($0.id) }
@@ -479,37 +486,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         if #available(macOS 13.0, *), SMAppService.mainApp.status == .enabled { login.symbolName = "checkmark.circle" }
         let footer = row([login, button("退出全屏消息", symbol: "power", action: #selector(quitApp))])
         let utilities = column([management, commands, footer])
-        let stack = column([header, devices, shortcuts, composer, separator(), conversation, separator(), utilities], spacing: 12)
+        var stack = column([header, devices, shortcuts, composer, separator(), conversation, separator(), utilities], spacing: 12)
+        let columnWidth = stack.widthAnchor.constraint(equalToConstant: contentWidth)
+        columnWidth.isActive = true
+        var height = ceil(stack.fittingSize.height) + 32
+        if height > availableHeight {
+            // Fit the controls themselves instead of clipping a scrolling document.
+            rowHeights.forEach { $0.constant = 30 }
+            columns.forEach { $0.0.spacing = max(4, $0.1 - 4) }
+            editorHeight.constant = 56
+            inlineChat.setCompactLayout(true)
+            height = ceil(stack.fittingSize.height) + 32
+        }
+        if height > availableHeight, (screen?.visibleFrame.width ?? 1440) >= 800 {
+            // Short screens keep every section on the same panel, side by side.
+            let sections = [header, devices, shortcuts, composer, conversation, utilities]
+            for section in sections {
+                stack.removeArrangedSubview(section)
+                section.removeFromSuperview()
+            }
+            let left = column([devices, shortcuts, composer], spacing: 8)
+            let right = column([conversation, separator(), utilities], spacing: 8)
+            let body = NSStackView(views: [left, right])
+            body.orientation = .horizontal
+            body.alignment = .top
+            body.distribution = .fillEqually
+            body.spacing = 16
+            left.widthAnchor.constraint(equalTo: right.widthAnchor).isActive = true
+            width = 2 * contentWidth + 48
+            columnWidth.isActive = false
+            stack = column([header, body], spacing: 10)
+            stack.widthAnchor.constraint(equalToConstant: width - 32).isActive = true
+            height = ceil(stack.fittingSize.height) + 32
+        }
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
-        let document = PopoverBackgroundView()
-        document.addSubview(stack)
+        let container = PopoverBackgroundView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        container.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 16),
-            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -16)
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16)
         ])
-        let height = ceil(stack.fittingSize.height) + 32
-        let availableHeight = (statusItem.button?.window?.screen ?? NSScreen.main)?.visibleFrame.height ?? 800
-        let visibleHeight = min(height, max(280, min(740, availableHeight - 40)))
-        document.setFrameSize(NSSize(width: width, height: height))
-        let container = PopoverBackgroundView(frame: NSRect(x: 0, y: 0, width: width, height: visibleHeight))
-        let scroll = NSScrollView(frame: container.bounds)
-        scroll.autoresizingMask = [.width, .height]
-        scroll.drawsBackground = false
-        scroll.borderType = .noBorder
-        scroll.hasVerticalScroller = height > visibleHeight
-        scroll.scrollerStyle = .overlay
-        scroll.documentView = document
-        container.addSubview(scroll)
         let controller = NSViewController()
         controller.view = container
         statusPopover.contentViewController = controller
         statusPopover.contentSize = container.frame.size
         container.layoutSubtreeIfNeeded()
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(scrollOrigin.y, max(0, height - visibleHeight))))
-        scroll.reflectScrolledClipView(scroll.contentView)
         if restoreChatFocus {
             inlineChat.focusInput()
             DispatchQueue.main.async { [weak self, weak container] in
