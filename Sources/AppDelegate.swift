@@ -1540,7 +1540,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private func showSendToast(message: String, recipients: String, failures: Int, titleOverride: String? = nil, detailOverride: String? = nil) {
         sendToast?.orderOut(nil)
 
-        let size = NSSize(width: 390, height: 168)
+        let card = SendToastView(message: message, recipients: recipients, failures: failures,
+                                 titleOverride: titleOverride, detailOverride: detailOverride)
+        let size = card.frame.size
         let screen = NSScreen.main ?? NSScreen.screens.first
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let finalOrigin = NSPoint(x: visible.maxX - size.width - 24, y: visible.maxY - size.height - 24)
@@ -1553,58 +1555,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
 
-        let card = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-        card.material = .hudWindow
-        card.blendingMode = .behindWindow
-        card.state = .active
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 18
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        panel.isReleasedWhenClosed = false
         panel.contentView = card
-
-        let icon = NSTextField(labelWithString: failures == 0 ? "✓" : "!")
-        icon.font = .systemFont(ofSize: 26, weight: .bold)
-        let accentColor: NSColor = failures == 0 ? .systemGreen : .systemOrange
-        icon.textColor = accentColor
-        icon.alignment = .center
-        icon.wantsLayer = true
-        icon.layer?.backgroundColor = accentColor.withAlphaComponent(0.16).cgColor
-        icon.layer?.cornerRadius = 19
-        icon.translatesAutoresizingMaskIntoConstraints = false
-
-        let title = NSTextField(labelWithString: titleOverride ?? (failures == 0 ? "消息发送成功" : "消息发送未完成"))
-        title.font = .systemFont(ofSize: 18, weight: .bold)
-        title.textColor = .labelColor
-
-        let recipient = NSTextField(wrappingLabelWithString: detailOverride ?? (failures == 0 ? "已发送给：\(recipients)" : "\(failures) 台电脑未确认收到"))
-        recipient.font = .systemFont(ofSize: 13, weight: .medium)
-        recipient.textColor = .secondaryLabelColor
-        recipient.maximumNumberOfLines = 2
-
-        let previewText = message.count > 42 ? String(message.prefix(42)) + "…" : message
-        let preview = NSTextField(wrappingLabelWithString: previewText)
-        preview.font = .systemFont(ofSize: 15)
-        preview.textColor = .labelColor
-        preview.maximumNumberOfLines = 2
-
-        let textStack = NSStackView(views: [title, recipient, preview])
-        textStack.orientation = .vertical
-        textStack.alignment = .leading
-        textStack.spacing = 7
-        textStack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(icon)
-        card.addSubview(textStack)
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),
-            icon.topAnchor.constraint(equalTo: card.topAnchor, constant: 21),
-            icon.widthAnchor.constraint(equalToConstant: 38),
-            icon.heightAnchor.constraint(equalToConstant: 38),
-            textStack.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 14),
-            textStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -20),
-            textStack.topAnchor.constraint(equalTo: card.topAnchor, constant: 20),
-            textStack.bottomAnchor.constraint(lessThanOrEqualTo: card.bottomAnchor, constant: -18)
-        ])
+        card.layoutSubtreeIfNeeded()
+        panel.invalidateShadow()
 
         sendToast = panel
         panel.alphaValue = 0
