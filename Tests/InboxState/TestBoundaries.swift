@@ -34,15 +34,12 @@ final class FullScreenAlertController {
     static var canCreate = true
     static var presentationSucceeds = true
     private let responseHandler: (Bool) -> Void
-    private let dismissHandler: (() -> Void)?
     private var finished = false
     private(set) var isPresented = false
 
-    init?(message: WireMessage, responseHandler: @escaping (Bool) -> Void,
-          dismissHandler: (() -> Void)? = nil) {
+    init?(message: WireMessage, responseHandler: @escaping (Bool) -> Void) {
         guard Self.canCreate else { return nil }
         self.responseHandler = responseHandler
-        self.dismissHandler = dismissHandler
         Self.creationCount += 1
     }
     @discardableResult
@@ -62,7 +59,7 @@ final class FullScreenAlertController {
         guard !finished else { return }
         finished = true
         isPresented = false
-        dismissHandler?()
+        responseHandler(false)
     }
 }
 
@@ -73,4 +70,10 @@ final class InboxReadableWindow: NSWindow {
     override var isKeyWindow: Bool { simulatedReadable }
     override var isVisible: Bool { simulatedReadable }
     override var occlusionState: NSWindow.OcclusionState { simulatedReadable ? [.visible] : [] }
+}
+
+var inboxTestResponses: [(UUID, Bool)] = []
+func inboxTestRespond(to message: WireMessage, accepted: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
+    inboxTestResponses.append((message.id, accepted))
+    completion(.success(()))
 }

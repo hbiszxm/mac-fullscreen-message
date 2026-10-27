@@ -1380,8 +1380,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         guard presentationAvailability.canPresent,
               let alert = FullScreenAlertController(message: message, responseHandler: { [weak self] accepted in
                   self?.finishPendingAlert(message, accepted: accepted)
-              }, dismissHandler: { [weak self] in
-                  self?.finishPendingAlert(message, accepted: nil)
               }) else { return }
         activeAlert = alert
         activeAlertID = message.id
@@ -1393,14 +1391,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         }
     }
 
-    private func finishPendingAlert(_ message: WireMessage, accepted: Bool?) {
+    private func finishPendingAlert(_ message: WireMessage, accepted: Bool) {
         guard pendingStore.contains(id: message.id) else { return }
         pendingStore.remove(id: message.id)
         if activeAlertID == message.id { activeAlert = nil; activeAlertID = nil }
-        historyStore.update(id: message.id, status: accepted.map { $0 ? "已点击收到" : "已拒绝" } ?? "已查看（ESC 关闭）")
+        historyStore.update(id: message.id, status: accepted ? "已收到" : "已拒绝")
         refreshUnreadIndicators()
         setStatus(pendingStore.alertMessages.isEmpty ? "全屏消息已处理" : "还有 \(pendingStore.alertMessages.count) 条全屏消息待查看")
-        guard let accepted else { return }
         messenger.respond(to: message, accepted: accepted) { [weak self] result in
             if case .failure(let error) = result {
                 self?.setStatus("处理结果返回失败：\(error.localizedDescription)", success: false)

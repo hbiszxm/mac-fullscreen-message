@@ -96,7 +96,11 @@ extension AppDelegate {
         assertCount(2, "Two pending alerts")
         guard let secondController = activeAlert else { fatalError("The new alert should be presented") }
         secondController.simulateEscape()
-        assertCount(1, "ESC clears one alert")
+        assertCount(1, "ESC rejects one alert")
+        inboxExpect(inboxTestResponses.count == 1 && inboxTestResponses[0].0 == secondAlert.id && !inboxTestResponses[0].1,
+                    "ESC must return a rejection for this message")
+        inboxExpect(historyStore.entries.first { $0.id == secondAlert.id }?.status == "已拒绝",
+                    "ESC rejection must be recorded in history")
         inboxExpect(pendingStore.contains(id: firstAlert.id) && !pendingStore.contains(id: secondAlert.id),
                     "ESC must remove only its own alert")
         viewNextPendingAlert()
@@ -106,6 +110,8 @@ extension AppDelegate {
         reopened.simulateEscape()
         reopened.simulateEscape()
         assertCount(0, "Repeated ESC")
+        inboxExpect(inboxTestResponses.count == 2 && inboxTestResponses[1].0 == firstAlert.id && !inboxTestResponses[1].1,
+                    "Repeated ESC must not duplicate the rejection")
 
         FullScreenAlertController.presentationSucceeds = false
         let failedPresentation = message("alert", "窗口未成功显示")

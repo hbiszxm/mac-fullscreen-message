@@ -221,7 +221,8 @@ with tempfile.TemporaryDirectory(prefix="fullscreen-readme-") as temporary:
             start = source.index("    func applicationDidFinishLaunching(")
             end = source.index("    func applicationWillTerminate(", start)
             source = source[:start] + MENU_FIXTURE + "\n" + source[end:]
-            source = source.replace("(statusItem.button?.window?.screen ?? NSScreen.main)?.visibleFrame.height ?? 800", "CGFloat(1000)")
+            source = source.replace("let screen = statusItem.button?.window?.screen ?? NSScreen.main", "let screen = NSScreen.main")
+            source = source.replace("(screen?.visibleFrame.height ?? 800)", "CGFloat(1000)")
         if path.name == "FullScreenAlert.swift":
             source = source.replace("let screens = NSScreen.screens", "let screens = Array(NSScreen.screens.prefix(1))")
             source = source.replace("contentRect: screen.frame", "contentRect: NSRect(x: 0, y: 0, width: 1440, height: 810)")

@@ -42,13 +42,22 @@ private final class AlertBackgroundView: NSView {
 }
 
 private final class AlertWindow: NSWindow {
-    var onEscape: (() -> Void)?
+    var onResponse: ((Bool) -> Void)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
-    override func cancelOperation(_ sender: Any?) { onEscape?() }
+    override func cancelOperation(_ sender: Any?) { onResponse?(false) }
+    private func handleResponseKey(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+              [36, 76, 53].contains(event.keyCode) else { return false }
+        // Holding a key must not process another message after this one closes.
+        if !event.isARepeat { onResponse?(event.keyCode != 53) }
+        return true
+    }
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        handleResponseKey(event) || super.performKeyEquivalent(with: event)
+    }
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { onEscape?() }
-        else { super.keyDown(with: event) }
+        if !handleResponseKey(event) { super.keyDown(with: event) }
     }
 }
 
@@ -63,7 +72,7 @@ private final class ResponseButton: NSButton {
         self.action = action
         isBordered = false
         focusRingType = .none
-        font = .systemFont(ofSize: 19, weight: .bold)
+        font = .systemFont(ofSize: 32, weight: .bold)
         attributedTitle = NSAttributedString(
             string: title,
             attributes: [
@@ -78,7 +87,7 @@ private final class ResponseButton: NSButton {
     override func draw(_ dirtyRect: NSRect) {
         let color = isHighlighted ? fillColor.blended(withFraction: 0.18, of: .black) ?? fillColor : fillColor
         color.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12).fill()
+        NSBezierPath(roundedRect: bounds, xRadius: 16, yRadius: 16).fill()
 
         let textSize = attributedTitle.size()
         attributedTitle.draw(at: NSPoint(
@@ -93,26 +102,23 @@ final class FullScreenAlertController: NSWindowController {
     private var backgrounds: [AlertBackgroundView] = []
     private var messagePanels: [NSView] = []
     private let responseHandler: (Bool) -> Void
-    private let dismissHandler: (() -> Void)?
     private var hasFinished = false
 
-    init?(message: WireMessage, responseHandler: @escaping (Bool) -> Void,
-          dismissHandler: (() -> Void)? = nil) {
+    init?(message: WireMessage, responseHandler: @escaping (Bool) -> Void) {
         precondition(Thread.isMainThread)
         let screens = NSScreen.screens
         guard let firstScreen = screens.first else { return nil }
         let primaryScreen = NSScreen.main ?? firstScreen
         self.responseHandler = responseHandler
-        self.dismissHandler = dismissHandler
         let primaryWindow = Self.makeWindow(for: primaryScreen)
         super.init(window: primaryWindow)
 
         screenWindows = [primaryWindow]
-        primaryWindow.onEscape = { [weak self] in self?.dismiss() }
+        primaryWindow.onResponse = { [weak self] in self?.finish(response: $0) }
         configure(primaryWindow, message: message)
         for screen in screens where screen !== primaryScreen {
             let extraWindow = Self.makeWindow(for: screen)
-            extraWindow.onEscape = { [weak self] in self?.dismiss() }
+            extraWindow.onResponse = { [weak self] in self?.finish(response: $0) }
             screenWindows.append(extraWindow)
             configure(extraWindow, message: message)
         }
@@ -133,6 +139,11 @@ final class FullScreenAlertController: NSWindowController {
     }
 
     private func configure(_ window: NSWindow, message: WireMessage) {
+        let panelSize = NSSize(width: window.frame.width * 0.92, height: window.frame.height * 0.90)
+        let horizontalPadding = min(56, max(24, window.frame.width * 0.035))
+        let verticalPadding = min(40, max(24, window.frame.height * 0.04))
+        let spacing = min(22, max(12, window.frame.height * 0.018))
+        let textWidth = panelSize.width - 2 * horizontalPadding
         let content = AlertBackgroundView()
         window.contentView = content
         backgrounds.append(content)
@@ -160,12 +171,13 @@ final class FullScreenAlertController: NSWindowController {
         sender.font = .systemFont(ofSize: 38, weight: .bold)
         sender.textColor = .white
         sender.alignment = .center
+        sender.lineBreakMode = .byTruncatingTail
 
         let body = NSTextField(wrappingLabelWithString: message.text)
-        body.font = .systemFont(ofSize: Self.messageFontSize(for: message.text, in: window.frame.size), weight: .bold)
         body.textColor = .white
         body.alignment = .center
         body.maximumNumberOfLines = 0
+        body.preferredMaxLayoutWidth = textWidth
         body.lineBreakMode = .byWordWrapping
         body.wantsLayer = true
         body.layer?.shadowColor = NSColor.systemBlue.cgColor
@@ -177,42 +189,60 @@ final class FullScreenAlertController: NSWindowController {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let time = NSTextField(labelWithString: formatter.string(from: message.sentAt))
         time.font = .systemFont(ofSize: 19)
-        time.textColor = .secondaryLabelColor
+        time.textColor = NSColor.white.withAlphaComponent(0.65)
         time.alignment = .center
 
-        let hint = NSTextField(labelWithString: "按 ESC 退出")
+        let hint = NSTextField(labelWithString: "回车：收到    Esc：拒绝")
         hint.font = .systemFont(ofSize: 21, weight: .medium)
         hint.textColor = NSColor.white.withAlphaComponent(0.72)
         hint.alignment = .center
 
         let accepted = ResponseButton(title: "收到", color: .systemGreen, target: self, action: #selector(acceptMessage))
         let rejected = ResponseButton(title: "拒绝", color: .systemRed, target: self, action: #selector(rejectMessage))
+        accepted.keyEquivalent = "\r"
+        accepted.keyEquivalentModifierMask = []
+        rejected.keyEquivalent = "\u{1b}"
+        rejected.keyEquivalentModifierMask = []
         let responseRow = NSStackView(views: [accepted, rejected])
         responseRow.orientation = .horizontal
         responseRow.distribution = .fillEqually
-        responseRow.spacing = 16
-        responseRow.widthAnchor.constraint(equalToConstant: 360).isActive = true
-        responseRow.heightAnchor.constraint(equalToConstant: 46).isActive = true
+        responseRow.spacing = 24
+        responseRow.widthAnchor.constraint(equalToConstant: min(560, textWidth)).isActive = true
+        responseRow.heightAnchor.constraint(equalToConstant: 72).isActive = true
+        accepted.heightAnchor.constraint(equalTo: responseRow.heightAnchor).isActive = true
+        rejected.heightAnchor.constraint(equalTo: responseRow.heightAnchor).isActive = true
 
-        let stack = NSStackView(views: [badge, sender, body, time, responseRow, hint])
+        let fixedHeight = [badge, sender, time, hint].reduce(CGFloat.zero) { $0 + $1.intrinsicContentSize.height }
+        let messageHeight = max(1, panelSize.height - 2 * verticalPadding - 5 * spacing - 72 - fixedHeight)
+        body.font = .systemFont(ofSize: Self.fittedMessageFontSize(for: message.text, screenSize: window.frame.size,
+                                                                available: NSSize(width: textWidth, height: messageHeight)), weight: .bold)
+        let messageArea = NSView()
+        body.translatesAutoresizingMaskIntoConstraints = false
+        messageArea.addSubview(body)
+        NSLayoutConstraint.activate([
+            body.centerXAnchor.constraint(equalTo: messageArea.centerXAnchor),
+            body.centerYAnchor.constraint(equalTo: messageArea.centerYAnchor),
+            body.widthAnchor.constraint(equalTo: messageArea.widthAnchor),
+            body.heightAnchor.constraint(lessThanOrEqualTo: messageArea.heightAnchor)
+        ])
+        let stack = NSStackView(views: [badge, sender, messageArea, time, responseRow, hint])
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = 22
+        stack.spacing = spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.setCustomSpacing(40, after: sender)
-        stack.setCustomSpacing(42, after: body)
         panel.addSubview(stack)
 
         NSLayoutConstraint.activate([
             panel.centerXAnchor.constraint(equalTo: content.centerXAnchor),
             panel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            panel.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor, multiplier: 0.88),
-            panel.heightAnchor.constraint(lessThanOrEqualTo: content.heightAnchor, multiplier: 0.82),
-            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 64),
-            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -64),
-            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 48),
-            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -42),
-            body.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor, multiplier: 0.78)
+            panel.widthAnchor.constraint(equalTo: content.widthAnchor, multiplier: 0.92),
+            panel.heightAnchor.constraint(equalTo: content.heightAnchor, multiplier: 0.90),
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: horizontalPadding),
+            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -horizontalPadding),
+            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: verticalPadding),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -verticalPadding),
+            messageArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            sender.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
     }
 
@@ -235,6 +265,21 @@ final class FullScreenAlertController: NSWindowController {
         default: base = 58
         }
         return max(52, min(156, base * max(0.9, scale)))
+    }
+
+    private static func fittedMessageFontSize(for text: String, screenSize: NSSize, available: NSSize) -> CGFloat {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        var size = messageFontSize(for: text, in: screenSize)
+        while size > 16 {
+            let bounds = (text as NSString).boundingRect(
+                with: NSSize(width: max(1, available.width - 8), height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: NSFont.systemFont(ofSize: size, weight: .bold), .paragraphStyle: paragraph])
+            if ceil(bounds.height) + 6 <= available.height { break }
+            size -= 1
+        }
+        return size
     }
 
     /// Basic window visibility only; it cannot prove that a person saw it.
@@ -268,13 +313,6 @@ final class FullScreenAlertController: NSWindowController {
         }
         window?.makeKey()
         return isPresented
-    }
-
-    @objc private func dismiss() {
-        guard !hasFinished else { return }
-        hasFinished = true
-        closeAllWindows()
-        dismissHandler?()
     }
 
     /// Session lock/sleep does not acknowledge or dismiss an unread message.

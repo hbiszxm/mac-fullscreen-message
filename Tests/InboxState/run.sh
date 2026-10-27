@@ -24,6 +24,8 @@ for original in sorted((project / "Sources").glob("*.swift")):
     if original.name == "AppDelegate.swift":
         assert text.count('NSSound(named: "Glass")?.play()') == 1
         text = text.replace('NSSound(named: "Glass")?.play()', "inboxTestSoundCount += 1")
+        assert text.count("messenger.respond(to: message, accepted: accepted)") == 1
+        text = text.replace("messenger.respond(to: message, accepted: accepted)", "inboxTestRespond(to: message, accepted: accepted)")
         text += "\n" + (tests / "AppDelegateFixture.swift").read_text()
     (sources / original.name).write_text(text)
 for filename in ["TestBoundaries.swift", "main.swift"]:

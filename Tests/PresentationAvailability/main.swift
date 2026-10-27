@@ -31,31 +31,47 @@ availability.stop()
 
 let message = WireMessage(id: UUID(), sender: "测试设备", text: "测试消息", sentAt: Date(),
                           kind: "alert", senderInstanceID: "test", relatedMessageID: nil)
-var responses: [Bool] = []
-var dismissals = 0
-if let alert = FullScreenAlertController(message: message, responseHandler: { responses.append($0) },
-                                        dismissHandler: { dismissals += 1 }) {
-    expect(!alert.isPresented, "Constructing a controller must not present it")
-    alert.perform(NSSelectorFromString("acceptMessage"))
-    alert.perform(NSSelectorFromString("rejectMessage"))
-    alert.perform(NSSelectorFromString("dismiss"))
-    expect(responses == [true], "A response must be delivered only once")
-    expect(dismissals == 0, "A response must not also invoke the Escape callback")
-}
-if let alert = FullScreenAlertController(message: message, responseHandler: { responses.append($0) },
-                                        dismissHandler: { dismissals += 1 }) {
-    alert.perform(NSSelectorFromString("dismiss"))
-    alert.perform(NSSelectorFromString("dismiss"))
-    alert.perform(NSSelectorFromString("acceptMessage"))
-    expect(dismissals == 1 && responses == [true], "Escape must mark read once without responding")
-}
-if let alert = FullScreenAlertController(message: message, responseHandler: { responses.append($0) },
-                                        dismissHandler: { dismissals += 1 }) {
-    alert.suspend()
-    alert.perform(NSSelectorFromString("dismiss"))
-    alert.perform(NSSelectorFromString("acceptMessage"))
-    expect(!alert.present(), "Suspended controllers must not present stale windows again")
-    expect(dismissals == 1 && responses == [true], "Suspension must retain the unread message without any response")
-}
 
-print("展示条件：锁屏、非活动会话、屏幕/系统休眠、无屏幕组合均通过；响应、ESC、挂起回调一次性验证通过（未展示窗口或锁屏）")
+func key(_ code: UInt16, repeating: Bool = false) -> NSEvent {
+    NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: 0, context: nil, characters: code == 53 ? "\u{1b}" : "\r",
+                    charactersIgnoringModifiers: code == 53 ? "\u{1b}" : "\r",
+                    isARepeat: repeating, keyCode: code)!
+}
+for (code, expected) in [(UInt16(36), true), (UInt16(76), true), (UInt16(53), false)] {
+    var responses: [Bool] = []
+    let alert = FullScreenAlertController(message: message, responseHandler: { responses.append($0) })!
+    let window = alert.window!
+    expect(!alert.isPresented, "Construction must not present a window")
+    expect(window.performKeyEquivalent(with: key(code, repeating: true)), "Repeated response keys must be consumed")
+    expect(responses.isEmpty, "Key repeat must not respond")
+    expect(window.performKeyEquivalent(with: key(code)), "Response key must be handled")
+    window.keyDown(with: key(code))
+    window.cancelOperation(nil)
+    expect(responses == [expected], "Return/Enter/Escape must respond once with the correct result")
+    expect(!alert.present(), "A handled alert must not reappear")
+}
+for accepted in [true, false] {
+    var responses: [Bool] = []
+    let alert = FullScreenAlertController(message: message, responseHandler: { responses.append($0) })!
+    alert.perform(NSSelectorFromString(accepted ? "acceptMessage" : "rejectMessage"))
+    alert.window?.cancelOperation(nil)
+    expect(responses == [accepted], "Buttons must use the same exactly-once response path")
+}
+do {
+    var responses: [Bool] = []
+    let alert = FullScreenAlertController(message: message, responseHandler: { responses.append($0) })!
+    let window = alert.window!
+    window.cancelOperation(nil)
+    expect(responses == [false], "Cancel operation must reject, not silently dismiss")
+}
+do {
+    var responses: [Bool] = []
+    let alert = FullScreenAlertController(message: message, responseHandler: { responses.append($0) })!
+    let window = alert.window!
+    alert.suspend()
+    window.cancelOperation(nil)
+    window.keyDown(with: key(36))
+    expect(!alert.present() && responses.isEmpty, "Lock/sleep suspension must not accept or reject")
+}
+print("PASS: presentation gates; Return/Enter accepts; Escape rejects; repeated keys ignored; responses exactly once; suspension sends no response")
