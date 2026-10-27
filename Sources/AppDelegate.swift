@@ -126,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private var peers: [Peer] = []
     private var activeAlert: FullScreenAlertController?
     private var activeAlertID: UUID?
+    // Only alerts received during an available session are auto-advanced.
+    private var liveAlertQueue: [UUID] = []
+    private var alertAdvanceToken: UUID?
+    private var pendingAlertButton: NSButton?
     private let pendingStore = PendingMessageStore()
     private let presentationAvailability = PresentationAvailability()
     private var sendToast: NSPanel?
@@ -468,9 +472,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         inlineChat.setTranscript(temporaryChatTranscript)
         inlineChat.setUnreadCount(pendingStore.chatMessages.count)
         var conversationViews: [NSView] = [inlineChat]
+        pendingAlertButton = nil
         if !pendingStore.alertMessages.isEmpty {
             let pending = button("待查看全屏消息 · \(pendingStore.alertMessages.count) 条", symbol: "envelope.badge", action: #selector(viewNextPendingAlert))
             pending.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            pendingAlertButton = pending
             conversationViews.append(pending)
         }
         let conversation = column(conversationViews)
@@ -577,7 +583,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     @objc private func sendQuickMessageFromPopover(_ sender: QuickMessageButton) {
         let targets = peers.filter { selectedPopoverPeerIDs.contains($0.id) }
-        statusPopover.performClose(nil)
         send(sender.messageText, to: targets)
     }
 
@@ -696,7 +701,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     @objc private func deleteCustomMessageButton(_ sender: PayloadButton) {
         customMessages = customMessages.filter { $0 != sender.payload }
         setStatus("已删除快捷消息", success: true)
-        rebuildStatusPopover()
+        rebuildStatusMenu()
     }
 
     private func addCustomMessageTargetMenu() {
@@ -857,12 +862,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     @objc private func sendInlineMenuMessage() {
         let text = menuMessageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !peers.isEmpty else { NSSound.beep(); return }
+        guard !text.isEmpty else { setStatus("请先输入消息内容", success: false); return }
         let targets = peers.filter { selectedPopoverPeerIDs.contains($0.id) }
-        guard !targets.isEmpty else { NSSound.beep(); return }
-        menuMessageView.string = ""
-        statusPopover.performClose(nil)
-        send(text, to: targets)
+        guard !targets.isEmpty else { setStatus("请选择接收电脑", success: false); return }
+        send(text, to: targets) { [weak self] success in
+            guard let self, success,
+                  self.menuMessageView.string.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
+            self.menuMessageView.string = ""
+        }
     }
 
     @objc private func favoriteInlineMenuMessage() {
@@ -1166,25 +1173,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         send(choice.text, to: targets)
     }
 
-    private func send(_ text: String, to targets: [Peer]) {
-        guard !targets.isEmpty else { setStatus("没有发现接收电脑", success: false); NSSound.beep(); return }
+    private func send(_ text: String, to targets: [Peer], completion: ((Bool) -> Void)? = nil) {
+        guard !targets.isEmpty else {
+            setStatus("请选择接收电脑", success: false)
+            completion?(false)
+            return
+        }
         setStatus("正在发送…")
         var remaining = targets.count
         var failures = 0
+        var failureDetails: [String] = []
         for peer in targets {
             let messageID = UUID()
-            addHistory(id: messageID, direction: "发送", sender: localDisplayName, recipients: peer.name, text: text, status: "已送达，等待对方确认")
+            addHistory(id: messageID, direction: "发送", sender: localDisplayName, recipients: peer.name, text: text, status: "正在发送")
             messenger.send(text: text, messageID: messageID, to: peer.endpoint) { [weak self] result in
-                if case .failure = result {
+                guard let self else { return }
+                switch result {
+                case .failure(let error):
                     failures += 1
-                    self?.historyStore.update(id: messageID, status: "发送失败")
+                    failureDetails.append("\(peer.name)：\(error.localizedDescription)")
+                    self.historyStore.update(id: messageID, status: "发送失败：\(error.localizedDescription)")
+                case .success:
+                    // A fast human response may arrive before the transport callback.
+                    if self.historyStore.entries.first(where: { $0.id == messageID })?.status == "正在发送" {
+                        self.historyStore.update(id: messageID, status: "已送达，等待对方处理")
+                    }
                 }
                 remaining -= 1
-                guard remaining == 0, let self else { return }
-                self.setStatus(failures == 0 ? "对方已确认收到" : "发送失败：\(failures) 台未确认", success: failures == 0)
+                guard remaining == 0 else { return }
+                self.setStatus(failures == 0 ? "已送达，等待对方处理" : "发送失败：\(failureDetails.joined(separator: "；"))", success: failures == 0)
                 let targetNames = targets.map(\.name).joined(separator: "、")
                 self.showSendToast(message: text, recipients: targetNames, failures: failures)
-                if failures == 0 { self.messageView.string = "" }
+                completion?(failures == 0)
                 if failures > 0 { NSSound.beep() }
             }
         }
@@ -1193,13 +1213,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     @objc private func sendCustomMessage() {
         let text = messageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let index = peerPopup.indexOfSelectedItem
-        guard !text.isEmpty, !peers.isEmpty, index >= 0 else { NSSound.beep(); return }
-        if index == 0 {
-            send(text, to: peers)
-        } else {
-            let peerIndex = index - 1
-            guard peers.indices.contains(peerIndex) else { NSSound.beep(); return }
-            send(text, to: [peers[peerIndex]])
+        guard !text.isEmpty else { setStatus("请先输入消息内容", success: false); return }
+        guard !peers.isEmpty, index >= 0,
+              index == 0 || peers.indices.contains(index - 1) else {
+            setStatus("请选择接收电脑", success: false)
+            return
+        }
+        let targets = index == 0 ? peers : [peers[index - 1]]
+        send(text, to: targets) { [weak self] success in
+            guard let self, success,
+                  self.messageView.string.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
+            self.messageView.string = ""
         }
     }
 
@@ -1312,6 +1336,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         if pendingStore.chatMessages.isEmpty { chatUnreadDot.clear() }
         else { chatUnreadDot.startBlinking() }
         inlineChat.setUnreadCount(pendingStore.chatMessages.count)
+        pendingAlertButton?.title = "待查看全屏消息 · \(pendingStore.alertMessages.count) 条"
+        pendingAlertButton?.isEnabled = !pendingStore.alertMessages.isEmpty
         updateStatusItemIcon()
     }
 
@@ -1336,6 +1362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         guard let text = sender.representedObject as? String else { return }
         customMessages = customMessages.filter { $0 != text }
         setStatus("已删除快捷消息", success: true)
+        rebuildStatusMenu()
     }
 
     @objc private func removePeer(_ sender: NSMenuItem) {
@@ -1352,11 +1379,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         addHistory(id: message.id, direction: "收到", sender: message.sender, recipients: localDisplayName, text: message.text, status: "等待处理")
         refreshUnreadIndicators()
         setStatus("收到 \(message.sender) 的全屏消息，等待查看")
-        if activeAlert == nil && presentationAvailability.canPresent { presentPendingAlert(message) }
+        if presentationAvailability.canPresent {
+            liveAlertQueue.append(message.id)
+            presentNextLiveAlert()
+        }
     }
 
     private func presentationAvailabilityChanged(_ available: Bool) {
         if !available {
+            liveAlertQueue.removeAll()
+            alertAdvanceToken = nil
             activeAlert?.suspend()
             activeAlert = nil
             activeAlertID = nil
@@ -1373,7 +1405,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         guard presentationAvailability.canPresent else { return }
         statusPopover.performClose(nil)
         if let activeAlert, activeAlert.isPresented { activeAlert.present(); return }
+        alertAdvanceToken = nil
+        liveAlertQueue.removeAll { $0 == message.id }
         presentPendingAlert(message)
+    }
+
+    private func presentNextLiveAlert() {
+        guard activeAlert == nil, alertAdvanceToken == nil,
+              presentationAvailability.canPresent else { return }
+        while !liveAlertQueue.isEmpty {
+            let id = liveAlertQueue.removeFirst()
+            guard let message = pendingStore.alertMessages.first(where: { $0.id == id }) else { continue }
+            presentPendingAlert(message)
+            if activeAlert != nil { return }
+        }
+    }
+
+    private func scheduleNextLiveAlert() {
+        guard !liveAlertQueue.isEmpty else { return }
+        let token = UUID()
+        alertAdvanceToken = token
+        // Let the previous windows close and the response keystroke finish.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.alertAdvanceToken == token else { return }
+            self.alertAdvanceToken = nil
+            self.presentNextLiveAlert()
+        }
     }
 
     private func presentPendingAlert(_ message: WireMessage) {
@@ -1394,10 +1451,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private func finishPendingAlert(_ message: WireMessage, accepted: Bool) {
         guard pendingStore.contains(id: message.id) else { return }
         pendingStore.remove(id: message.id)
+        liveAlertQueue.removeAll { $0 == message.id }
         if activeAlertID == message.id { activeAlert = nil; activeAlertID = nil }
         historyStore.update(id: message.id, status: accepted ? "已收到" : "已拒绝")
         refreshUnreadIndicators()
         setStatus(pendingStore.alertMessages.isEmpty ? "全屏消息已处理" : "还有 \(pendingStore.alertMessages.count) 条全屏消息待查看")
+        scheduleNextLiveAlert()
         messenger.respond(to: message, accepted: accepted) { [weak self] result in
             if case .failure(let error) = result {
                 self?.setStatus("处理结果返回失败：\(error.localizedDescription)", success: false)
@@ -1581,8 +1640,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private func setStatus(_ text: String, success: Bool? = nil) {
         lastStatus = text
         statusLabel.stringValue = text
+        statusLabel.toolTip = text
+        popoverStatusLabel.stringValue = text
+        popoverStatusLabel.toolTip = text
         updateStatusItemIcon()
-        rebuildStatusMenu()
+        // Keep editor focus and button identity stable while sends complete.
+        if statusItem.menu != nil { rebuildStatusMenu() }
     }
 
     private func updateStatusItemIcon() {

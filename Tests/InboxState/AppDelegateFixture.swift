@@ -123,6 +123,8 @@ extension AppDelegate {
         assertCount(2, "No available screen")
         inboxExpect(activeAlert == nil, "No-screen initialization must leave the message pending")
         inboxExpect(inboxTestSoundCount == 3, "Only successful simulated presentations should request a sound")
+        runSendingStateTests()
+        runLiveAlertQueueTests()
         print("AppDelegate 收件箱集成：锁屏双类型角标、重复去重、解锁保留、聊天单独已读、展示不清数、挂起保留、ESC 单条处理、展示失败/无屏幕保留、持久化恢复均通过")
     }
 }

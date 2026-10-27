@@ -1,4 +1,5 @@
 import AppKit
+import Network
 
 let inboxTestSuiteName = "cn.local.fullscreen-message.tests.inbox-state.\(UUID().uuidString)"
 let inboxTestDefaults = UserDefaults(suiteName: inboxTestSuiteName)!
@@ -77,3 +78,16 @@ func inboxTestRespond(to message: WireMessage, accepted: Bool, completion: @esca
     inboxTestResponses.append((message.id, accepted))
     completion(.success(()))
 }
+
+struct InboxTestSend {
+    let text: String
+    let id: UUID
+    let endpoint: NWEndpoint
+    let completion: (Result<Void, Error>) -> Void
+}
+var inboxTestSends: [InboxTestSend] = []
+func inboxTestSend(text: String, messageID: UUID, to endpoint: NWEndpoint,
+                   completion: @escaping (Result<Void, Error>) -> Void) {
+    inboxTestSends.append(InboxTestSend(text: text, id: messageID, endpoint: endpoint, completion: completion))
+}
+func inboxTestToast(message: String, recipients: String, failures: Int) {}

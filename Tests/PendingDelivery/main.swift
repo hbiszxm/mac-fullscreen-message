@@ -163,3 +163,20 @@ let restored = PendingMessageStore(defaults: UserDefaults(suiteName: suiteName)!
 expect(restored.messages.map(\.id) == [secondAlert.id], "Handling one alert must persist without clearing the other")
 
 print("本机未读交付：持久化先于 OK、重复包去重、未展示全屏保留、聊天独立已读和重启恢复均通过")
+
+// Exercise the shipping send API with overlapping identical-text messages.
+let sender = LANMessenger(displayName: "IsolatedSender")
+let burstIDs = (0..<12).map { _ in UUID() }
+var completions = 0
+var sendErrors: [String] = []
+for id in burstIDs {
+    sender.send(text: "连续同文消息", messageID: id, to: .hostPort(host: "127.0.0.1", port: port)) { result in
+        completions += 1
+        if case .failure(let error) = result { sendErrors.append(error.localizedDescription) }
+    }
+}
+expect(waitUntil(timeout: 12) { completions == burstIDs.count }, "Every rapid send must complete")
+expect(sendErrors.isEmpty, "Rapid sends failed: \(sendErrors)")
+expect(burstIDs.allSatisfy { deliveryCounts[$0] == 1 && inbox.contains(id: $0) },
+       "Every distinct UUID must be delivered once even when text is identical")
+print("连续传输：12 条并发同文消息全部确认、逐条持久化、无重复交付")
