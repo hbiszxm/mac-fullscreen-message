@@ -34,12 +34,14 @@ final class FullScreenAlertController {
     static var suspensionCount = 0
     static var canCreate = true
     static var presentationSucceeds = true
+    let senderDisplayName: String
     private let responseHandler: (Bool) -> Void
     private var finished = false
     private(set) var isPresented = false
 
-    init?(message: WireMessage, responseHandler: @escaping (Bool) -> Void) {
+    init?(message: WireMessage, senderDisplayName: String? = nil, responseHandler: @escaping (Bool) -> Void) {
         guard Self.canCreate else { return nil }
+        self.senderDisplayName = senderDisplayName ?? message.sender
         self.responseHandler = responseHandler
         Self.creationCount += 1
     }

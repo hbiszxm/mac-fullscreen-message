@@ -188,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         createComposerWindow()
         createHistoryWindow()
         for message in pendingStore.chatMessages {
-            appendChatLine(sender: message.sender, text: message.text, incoming: true, date: message.sentAt)
+            appendChatLine(sender: peerNameStore.displayName(for: message), text: message.text, incoming: true, date: message.sentAt)
         }
         refreshUnreadIndicators()
         presentationAvailability.start { [weak self] available in
@@ -1308,9 +1308,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     private func showIncomingChat(_ message: WireMessage) {
         guard pendingStore.add(message) else { return }
-        addHistory(id: message.id, direction: "收到聊天", sender: message.sender, recipients: localDisplayName, text: message.text, status: "未读")
-        appendChatLine(sender: message.sender, text: message.text, incoming: true, date: message.sentAt)
-        setChatStatus("收到 \(message.sender) 的聊天消息")
+        addHistory(id: message.id, direction: "收到聊天", sender: peerNameStore.displayName(for: message), recipients: localDisplayName, text: message.text, status: "未读")
+        appendChatLine(sender: peerNameStore.displayName(for: message), text: message.text, incoming: true, date: message.sentAt)
+        setChatStatus("收到 \(peerNameStore.displayName(for: message)) 的聊天消息")
         refreshUnreadIndicators()
         scheduleChatRead()
     }
@@ -1376,9 +1376,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     private func showIncoming(_ message: WireMessage) {
         guard pendingStore.add(message) else { return }
-        addHistory(id: message.id, direction: "收到", sender: message.sender, recipients: localDisplayName, text: message.text, status: "等待处理")
+        addHistory(id: message.id, direction: "收到", sender: peerNameStore.displayName(for: message), recipients: localDisplayName, text: message.text, status: "等待处理")
         refreshUnreadIndicators()
-        setStatus("收到 \(message.sender) 的全屏消息，等待查看")
+        setStatus("收到 \(peerNameStore.displayName(for: message)) 的全屏消息，等待查看")
         if presentationAvailability.canPresent {
             liveAlertQueue.append(message.id)
             presentNextLiveAlert()
@@ -1435,7 +1435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     private func presentPendingAlert(_ message: WireMessage) {
         guard presentationAvailability.canPresent,
-              let alert = FullScreenAlertController(message: message, responseHandler: { [weak self] accepted in
+              let alert = FullScreenAlertController(message: message, senderDisplayName: peerNameStore.displayName(for: message), responseHandler: { [weak self] accepted in
                   self?.finishPendingAlert(message, accepted: accepted)
               }) else { return }
         activeAlert = alert
@@ -1470,10 +1470,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         guard let relatedID = message.relatedMessageID else { return }
         let accepted = message.kind == "accepted"
         historyStore.update(id: relatedID, status: accepted ? "对方已收到" : "对方已拒绝")
-        setStatus(accepted ? "\(message.sender) 已确认收到" : "\(message.sender) 已拒绝消息", success: accepted)
-        showSendToast(message: accepted ? "对方已确认收到" : "对方已拒绝", recipients: message.sender, failures: accepted ? 0 : 1,
+        setStatus(accepted ? "\(peerNameStore.displayName(for: message)) 已确认收到" : "\(peerNameStore.displayName(for: message)) 已拒绝消息", success: accepted)
+        showSendToast(message: accepted ? "对方已确认收到" : "对方已拒绝", recipients: peerNameStore.displayName(for: message), failures: accepted ? 0 : 1,
                       titleOverride: accepted ? "对方已收到" : "对方已拒绝",
-                      detailOverride: "来自：\(message.sender)")
+                      detailOverride: "来自：\(peerNameStore.displayName(for: message))")
     }
 
     @objc private func showComposer() {

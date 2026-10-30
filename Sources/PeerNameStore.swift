@@ -15,6 +15,12 @@ final class PeerNameStore {
         names[key(for: peer)] ?? peer.name
     }
 
+    /// Resolve saved labels by identity, including unread messages from offline devices.
+    func displayName(for message: WireMessage) -> String {
+        guard let id = message.senderInstanceID, !id.isEmpty else { return message.sender }
+        return names["instance:\(id)"] ?? message.sender
+    }
+
     func renamed(_ peers: [Peer]) -> [Peer] {
         peers.map { peer in
             Peer(id: peer.id, name: displayName(for: peer), endpoint: peer.endpoint, instanceID: peer.instanceID)

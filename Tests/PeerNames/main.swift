@@ -41,3 +41,21 @@ expect(fallbackReload.displayName(for: rediscovered) == "New system name", "Rese
 expect(PeerNameStore(defaults: defaults).displayName(for: rediscovered) == "New system name", "Reset should persist")
 
 print("设备名称：持久化、稳定身份、地址保留、空名称拒绝与恢复默认均通过")
+
+func message(sender: String = "MacBook Air", id: String? = "device-1") -> WireMessage {
+    WireMessage(id: UUID(), sender: sender, text: "上班", sentAt: Date(), kind: "alert",
+                senderInstanceID: id, relatedMessageID: nil)
+}
+let incoming = message()
+expect(store.displayName(for: incoming) == "接待电脑", "Incoming messages must resolve saved aliases without online discovery")
+expect(store.displayName(for: message(sender: "Changed system name")) == "接待电脑", "A changed system name must keep the same alias")
+expect(store.displayName(for: message(id: "another-device")) == "MacBook Air", "Identical system names must not share aliases")
+expect(store.displayName(for: message(id: nil)) == "MacBook Air", "Legacy messages without identity must keep the original name")
+expect(store.displayName(for: message(id: "")) == "MacBook Air", "Empty identities must keep the original name")
+store.setName("新备注", for: original)
+expect(store.displayName(for: incoming) == "新备注", "Unread messages must use the latest alias at presentation time")
+expect(PeerNameStore(defaults: defaults).displayName(for: incoming) == "新备注", "Incoming aliases must survive restart")
+store.resetName(for: original)
+expect(store.displayName(for: incoming) == "MacBook Air", "Reset must restore the original sender name")
+expect(incoming.sender == "MacBook Air" && incoming.senderInstanceID == "device-1", "Presentation must not mutate wire identity")
+print("消息备注：离线匹配、重启保留、备注修改、同名设备隔离、旧消息回退与原身份保留均通过")

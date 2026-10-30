@@ -104,7 +104,7 @@ final class FullScreenAlertController: NSWindowController {
     private let responseHandler: (Bool) -> Void
     private var hasFinished = false
 
-    init?(message: WireMessage, responseHandler: @escaping (Bool) -> Void) {
+    init?(message: WireMessage, senderDisplayName: String? = nil, responseHandler: @escaping (Bool) -> Void) {
         precondition(Thread.isMainThread)
         let screens = NSScreen.screens
         guard let firstScreen = screens.first else { return nil }
@@ -115,12 +115,12 @@ final class FullScreenAlertController: NSWindowController {
 
         screenWindows = [primaryWindow]
         primaryWindow.onResponse = { [weak self] in self?.finish(response: $0) }
-        configure(primaryWindow, message: message)
+        configure(primaryWindow, message: message, senderDisplayName: senderDisplayName)
         for screen in screens where screen !== primaryScreen {
             let extraWindow = Self.makeWindow(for: screen)
             extraWindow.onResponse = { [weak self] in self?.finish(response: $0) }
             screenWindows.append(extraWindow)
-            configure(extraWindow, message: message)
+            configure(extraWindow, message: message, senderDisplayName: senderDisplayName)
         }
     }
 
@@ -138,7 +138,7 @@ final class FullScreenAlertController: NSWindowController {
         return window
     }
 
-    private func configure(_ window: NSWindow, message: WireMessage) {
+    private func configure(_ window: NSWindow, message: WireMessage, senderDisplayName: String?) {
         let panelSize = NSSize(width: window.frame.width * 0.92, height: window.frame.height * 0.90)
         let horizontalPadding = min(56, max(24, window.frame.width * 0.035))
         let verticalPadding = min(40, max(24, window.frame.height * 0.04))
@@ -167,7 +167,7 @@ final class FullScreenAlertController: NSWindowController {
         badge.textColor = NSColor(calibratedRed: 0.35, green: 0.76, blue: 1, alpha: 1)
         badge.alignment = .center
 
-        let sender = NSTextField(labelWithString: message.sender)
+        let sender = NSTextField(labelWithString: senderDisplayName ?? message.sender)
         sender.font = .systemFont(ofSize: 38, weight: .bold)
         sender.textColor = .white
         sender.alignment = .center

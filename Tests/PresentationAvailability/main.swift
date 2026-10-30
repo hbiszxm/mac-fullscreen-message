@@ -75,3 +75,14 @@ do {
     expect(!alert.present() && responses.isEmpty, "Lock/sleep suspension must not accept or reject")
 }
 print("PASS: presentation gates; Return/Enter accepts; Escape rejects; repeated keys ignored; responses exactly once; suspension sends no response")
+
+do {
+    let alert = FullScreenAlertController(message: message, senderDisplayName: "我的设备备注", responseHandler: { _ in })!
+    func labels(_ view: NSView) -> [String] {
+        (view as? NSTextField).map { [$0.stringValue] } ?? view.subviews.flatMap(labels)
+    }
+    let displayed = labels(alert.window!.contentView!)
+    expect(displayed.contains("我的设备备注") && !displayed.contains(message.sender), "Rendered fullscreen sender must use the provided alias")
+    alert.suspend()
+}
+print("PASS: fullscreen view renders local alias instead of the original device name")

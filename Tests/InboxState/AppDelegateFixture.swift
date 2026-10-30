@@ -123,8 +123,32 @@ extension AppDelegate {
         assertCount(2, "No available screen")
         inboxExpect(activeAlert == nil, "No-screen initialization must leave the message pending")
         inboxExpect(inboxTestSoundCount == 3, "Only successful simulated presentations should request a sound")
+        runSenderAliasTests()
         runSendingStateTests()
         runLiveAlertQueueTests()
         print("AppDelegate 收件箱集成：锁屏双类型角标、重复去重、解锁保留、聊天单独已读、展示不清数、挂起保留、ESC 单条处理、展示失败/无屏幕保留、持久化恢复均通过")
+    }
+}
+
+extension AppDelegate {
+    func runSenderAliasTests() {
+        presentationAvailability.setAvailability(false)
+        let peer = Peer(id: "alias-peer", name: "MacBook Air", endpoint: .hostPort(host: "127.0.0.1", port: 1), instanceID: "alias-device")
+        peerNameStore.setName("办公室同事", for: peer)
+        let message = WireMessage(id: UUID(), sender: "MacBook Air", text: "备注显示测试", sentAt: Date(),
+                                  kind: "alert", senderInstanceID: "alias-device", relatedMessageID: nil)
+        showIncoming(message)
+        inboxExpect(lastStatus.contains("办公室同事"), "Incoming status must show the alias")
+        inboxExpect(historyStore.entries.first { $0.id == message.id }?.sender == "办公室同事", "New received history must show the alias")
+        inboxExpect(pendingStore.alertMessages.first { $0.id == message.id }?.sender == "MacBook Air", "Pending storage must retain the original sender")
+        peerNameStore.setName("更新后的备注", for: peer)
+        presentationAvailability.setAvailability(true)
+        FullScreenAlertController.canCreate = true
+        FullScreenAlertController.presentationSucceeds = true
+        presentPendingAlert(message)
+        inboxExpect(activeAlert?.senderDisplayName == "更新后的备注", "Fullscreen presentation must use the current alias even without discovery")
+        activeAlert?.simulateEscape()
+        inboxExpect(inboxTestResponses.last?.0 == message.id, "Alias presentation must retain the response message identity")
+        print("备注集成：全屏展示、接收提示、新历史使用备注；待处理原始消息与回复身份保留")
     }
 }
