@@ -26,12 +26,7 @@ MENU_FIXTURE = r'''
         lastStatus = "已就绪，等待消息"
         customMessages = []
         menuMessageView.string = "十分钟后开会"
-        temporaryChatTranscript.setAttributedString(readmeTranscript())
         rebuildStatusPopover()
-        inlineChat.onSend = nil
-        inlineChat.onRead = nil
-        inlineChat.setUnreadCount(3)
-        readmeReveal(inlineChat)
         return statusPopover.contentViewController!.view
     }
 '''
@@ -40,28 +35,6 @@ RENDERER = r'''
 import AppKit
 
 let fixtureDefaults = UserDefaults(suiteName: "cn.local.fullscreen-message.readme.fixtures")!
-
-func readmeTranscript() -> NSAttributedString {
-    let value = NSMutableAttributedString(string: "")
-    for (sender, text, incoming) in [
-        ("设计组 Mac", "方案已经更新，可以一起看一下。", true),
-        ("我", "好的，现在看。", false)
-    ] {
-        value.append(NSAttributedString(string: "\(sender)　", attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-            .foregroundColor: incoming ? NSColor.systemBlue : NSColor.systemGreen
-        ]))
-        value.append(NSAttributedString(string: "\(text)\n", attributes: [
-            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor
-        ]))
-    }
-    return value
-}
-
-func readmeReveal(_ view: NSView) {
-    if let privacy = view as? PrivacyChatView { privacy.keyboardActive = true }
-    view.subviews.forEach(readmeReveal)
-}
 
 // Offscreen windows provide the AppKit layout context; none are ordered front.
 var retainedWindows: [NSWindow] = []
@@ -136,16 +109,14 @@ fixtureDefaults.removePersistentDomain(forName: "cn.local.fullscreen-message.rea
 let delegate = AppDelegate()
 let menu = delegate.readmeMenuView()
 host(menu, size: menu.frame.size)
-readmeReveal(menu)
 let menuImage = capture(menu)
 
-let chat = InlineChatView(frame: NSRect(x: 0, y: 0, width: 358, height: 157))
-chat.setRecipients(["设计组 Mac", "运营组 Mac"])
-chat.setTranscript(readmeTranscript())
-chat.setUnreadCount(3)
-host(chat, size: NSSize(width: 358, height: 157))
-readmeReveal(chat)
-let chatImage = capture(chat)
+let accepted = SendToastView(message: "", recipients: "设计组", failures: 0, titleOverride: "设计组 已收到", detailOverride: "全屏消息回执", responseAccepted: true)
+host(accepted, size: accepted.frame.size)
+let acceptedImage = capture(accepted)
+let rejected = SendToastView(message: "", recipients: "运营组", failures: 0, titleOverride: "运营组 已拒绝", detailOverride: "全屏消息回执", responseAccepted: false)
+host(rejected, size: rejected.frame.size)
+let rejectedImage = capture(rejected)
 
 let logoView = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 25))
 let logo = NSImageView(frame: NSRect(x: 6, y: 2, width: 27, height: 20))
@@ -157,13 +128,13 @@ logoView.addSubview(badge)
 host(logoView, size: logoView.frame.size)
 let logoImage = capture(logoView)
 
-card("menu-chat.png") {
+card("menu.png") {
     let scale: CGFloat = 1.14
     let menuSize = NSSize(width: menu.frame.width * scale, height: menu.frame.height * scale)
     let menuRect = NSRect(x: 90, y: (1000 - menuSize.height) / 2 - 4, width: menuSize.width, height: menuSize.height)
     roundedImage(menuImage, rect: menuRect, radius: 22)
-    label("菜单栏与临时会话", x: 640, y: 758, size: 44, weight: .semibold)
-    label("选择电脑，发送提醒，随手聊两句。", x: 642, y: 700, size: 25, color: secondary)
+    label("选择设备，发送全屏提醒", x: 640, y: 758, size: 36, weight: .semibold)
+    label("上线默认选中，收到与拒绝一目了然。", x: 642, y: 700, size: 25, color: secondary)
 
     let pill = NSRect(x: 642, y: 602, width: 184, height: 58)
     NSColor.white.withAlphaComponent(0.80).setFill()
@@ -181,7 +152,8 @@ card("menu-chat.png") {
     NSColor(calibratedWhite: 0.97, alpha: 1).setFill()
     NSBezierPath(roundedRect: detail, xRadius: 24, yRadius: 24).fill()
     NSGraphicsContext.restoreGraphicsState()
-    chatImage.draw(in: NSRect(x: 648, y: 176, width: 830, height: 830 * 157 / 358))
+    acceptedImage.draw(in: NSRect(x: 668, y: 374, width: 760, height: 760 * accepted.frame.height / 360))
+    rejectedImage.draw(in: NSRect(x: 668, y: 214, width: 760, height: 760 * rejected.frame.height / 360))
     label("界面示例", x: 644, y: 95, size: 19, color: secondary)
 }
 
@@ -233,7 +205,7 @@ with tempfile.TemporaryDirectory(prefix="fullscreen-readme-") as temporary:
     main = working / "main.swift"
     main.write_text(RENDERER)
     subprocess.run([
-        "xcrun", "swiftc", "-swift-version", "5", "-O",
+        "xcrun", "swiftc", "-swift-version", "5", "-O", "-module-cache-path", str(working / "module-cache"),
         *map(str, sources), str(main), "-o", str(executable),
         "-framework", "AppKit", "-framework", "Network", "-framework", "ServiceManagement",
     ], check=True)

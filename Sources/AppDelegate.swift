@@ -1,107 +1,6 @@
 import AppKit
 import ServiceManagement
 
-private final class PrivacyShieldView: NSVisualEffectView {
-    // The overlay obscures content without consuming the click that starts editing.
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
-
-final class PrivacyChatView: NSView {
-    private let shield = PrivacyShieldView()
-    private var tracking: NSTrackingArea?
-    private(set) var mouseInside = false
-    var keyboardActive = false {
-        didSet {
-            updatePrivacy()
-            if keyboardActive { onInteraction?() }
-        }
-    }
-    var onInteraction: (() -> Void)?
-    var isRevealed: Bool { shield.isHidden }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        shield.material = .hudWindow
-        shield.blendingMode = .withinWindow
-        shield.state = .active
-        shield.wantsLayer = true
-        shield.layer?.cornerRadius = 12
-        shield.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(shield)
-        NSLayoutConstraint.activate([
-            shield.leadingAnchor.constraint(equalTo: leadingAnchor),
-            shield.trailingAnchor.constraint(equalTo: trailingAnchor),
-            shield.topAnchor.constraint(equalTo: topAnchor),
-            shield.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let next = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
-        addTrackingArea(next)
-        tracking = next
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        mouseInside = true
-        updatePrivacy()
-        onInteraction?()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        mouseInside = false
-        updatePrivacy()
-    }
-
-    func conceal() {
-        mouseInside = false
-        keyboardActive = false
-        shield.isHidden = false
-    }
-
-    func keepShieldOnTop() {
-        addSubview(shield, positioned: .above, relativeTo: nil)
-    }
-
-    private func updatePrivacy() {
-        shield.isHidden = mouseInside || keyboardActive
-    }
-}
-
-private final class UnreadDotView: NSView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.systemRed.cgColor
-        layer?.cornerRadius = 5
-        isHidden = true
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    func startBlinking() {
-        isHidden = false
-        guard layer?.animation(forKey: "unreadBlink") == nil else { return }
-        let animation = CABasicAnimation(keyPath: "opacity")
-        animation.fromValue = 1.0
-        animation.toValue = 0.18
-        animation.duration = 0.65
-        animation.autoreverses = true
-        animation.repeatCount = .infinity
-        layer?.add(animation, forKey: "unreadBlink")
-    }
-
-    func clear() {
-        layer?.removeAnimation(forKey: "unreadBlink")
-        isHidden = true
-    }
-}
-
 private final class SendChoice: NSObject {
     let text: String
     let peerID: String?
@@ -121,7 +20,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private let statusBadgeView = StatusUnreadBadgeView()
     private let statusMenu = NSMenu()
     private var window: NSWindow!
-    private var historyWindow: NSWindow!
     private var messenger: LANMessenger!
     private var peers: [Peer] = []
     private var activeAlert: FullScreenAlertController?
@@ -133,8 +31,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private let pendingStore = PendingMessageStore()
     private let presentationAvailability = PresentationAvailability()
     private var sendToast: NSPanel?
-    private let temporaryChatTranscript = NSMutableAttributedString(string: "")
-    private let inlineChat = InlineChatView()
     private let popoverStatusLabel = NSTextField(labelWithString: "")
     private var lastStatus = "正在启动…"
     private var activity: NSObjectProtocol?
@@ -152,11 +48,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private let copyRestartButton = NSButton(title: "复制命令", target: nil, action: nil)
     private let uninstallCommandField = NSTextField(string: "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/uninstall.sh?cache=$(date +%s)\" | /bin/bash")
     private let copyUninstallButton = NSButton(title: "复制命令", target: nil, action: nil)
-    private let chatHistoryView = NSTextView()
-    private let chatInputField = NSTextField()
-    private let chatSendButton = NSButton(title: "发送聊天", target: nil, action: nil)
-    private let chatPrivacyView = PrivacyChatView()
-    private let chatUnreadDot = UnreadDotView()
     private let menuMessageView = PopoverMessageTextView()
     private let menuSendButton = PopoverButton(title: "发送", target: nil, action: nil)
     private let menuFavoriteButton = PopoverButton(title: "收藏", target: nil, action: nil)
@@ -170,8 +61,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private let peerNameStore = PeerNameStore()
     private var advertisedPeers: [Peer] = []
     private var popoverQuickButtons: [QuickMessageButton] = []
-    private let historyStore = MessageHistoryStore()
-    private let historyView = NSTextView()
 
     private var customMessages: [String] {
         get { UserDefaults.standard.stringArray(forKey: "customMessages") ?? [] }
@@ -186,10 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         }
         createStatusItem()
         createComposerWindow()
-        createHistoryWindow()
-        for message in pendingStore.chatMessages {
-            appendChatLine(sender: peerNameStore.displayName(for: message), text: message.text, incoming: true, date: message.sentAt)
-        }
+        clearRetiredData()
         refreshUnreadIndicators()
         presentationAvailability.start { [weak self] available in
             self?.presentationAvailabilityChanged(available)
@@ -203,7 +89,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     func applicationWillTerminate(_ notification: Notification) { presentationAvailability.stop() }
 
-    func popoverDidClose(_ notification: Notification) { inlineChat.conceal() }
+    private func clearRetiredData() {
+        UserDefaults.standard.removeObject(forKey: "messageHistoryV1")
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
@@ -299,7 +187,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     }
 
     private func rebuildStatusPopover() {
-        let restoreChatFocus = inlineChat.inputHasFocus
         let restoreEditorFocus = menuMessageView.window?.firstResponder === menuMessageView
         let selection = menuMessageView.selectedRange()
         statusPopover.delegate = self
@@ -459,31 +346,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         menuSendButton.isEnabled = !selectedPopoverPeerIDs.isEmpty
         let composer = column([heading("自定义消息"), editorFrame, row([menuFavoriteButton, menuSendButton])])
 
-        inlineChat.setCompactLayout(false)
-        inlineChat.onSend = { [weak self] text in
-            guard let self else { return }
-            let targets = self.peers.filter { self.selectedPopoverPeerIDs.contains($0.id) }
-            self.sendTemporaryChat(text, to: targets) { [weak self] success in
-                self?.inlineChat.finishSending(text, success: success)
-            }
-        }
-        inlineChat.onRead = { [weak self] in self?.scheduleChatRead() }
-        inlineChat.setRecipients(peers.filter { selectedPopoverPeerIDs.contains($0.id) }.map(\.name))
-        inlineChat.setTranscript(temporaryChatTranscript)
-        inlineChat.setUnreadCount(pendingStore.chatMessages.count)
-        var conversationViews: [NSView] = [inlineChat]
+        var pendingViews: [NSView] = []
         pendingAlertButton = nil
         if !pendingStore.alertMessages.isEmpty {
             let pending = button("待查看全屏消息 · \(pendingStore.alertMessages.count) 条", symbol: "envelope.badge", action: #selector(viewNextPendingAlert))
             pending.heightAnchor.constraint(equalToConstant: 34).isActive = true
             pendingAlertButton = pending
-            conversationViews.append(pending)
+            pendingViews.append(pending)
         }
-        let conversation = column(conversationViews)
-        let management = row([
-            button("检查更新", symbol: "arrow.triangle.2.circlepath", action: #selector(checkForUpdates)),
-            button("查看消息历史", symbol: "clock", action: #selector(showHistory))
-        ])
+        let management = button("检查更新", symbol: "arrow.triangle.2.circlepath", action: #selector(checkForUpdates))
         let commands = row([
             command("复制重启命令", symbol: "arrow.clockwise", value: restartCommandField.stringValue),
             command("复制卸载命令", symbol: "trash", value: uninstallCommandField.stringValue)
@@ -491,8 +362,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         let login = button("开机自动运行", symbol: "circle", action: #selector(toggleLoginItem(_:)))
         if #available(macOS 13.0, *), SMAppService.mainApp.status == .enabled { login.symbolName = "checkmark.circle" }
         let footer = row([login, button("退出全屏消息", symbol: "power", action: #selector(quitApp))])
-        let utilities = column([management, commands, footer])
-        var stack = column([header, devices, shortcuts, composer, separator(), conversation, separator(), utilities], spacing: 12)
+        let utilities = column(pendingViews + [management, commands, footer])
+        var stack = column([header, devices, shortcuts, composer, separator(), utilities], spacing: 12)
         let columnWidth = stack.widthAnchor.constraint(equalToConstant: contentWidth)
         columnWidth.isActive = true
         var height = ceil(stack.fittingSize.height) + 32
@@ -501,18 +372,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             rowHeights.forEach { $0.constant = 30 }
             columns.forEach { $0.0.spacing = max(4, $0.1 - 4) }
             editorHeight.constant = 56
-            inlineChat.setCompactLayout(true)
             height = ceil(stack.fittingSize.height) + 32
         }
         if height > availableHeight, (screen?.visibleFrame.width ?? 1440) >= 800 {
             // Short screens keep every section on the same panel, side by side.
-            let sections = [header, devices, shortcuts, composer, conversation, utilities]
+            let sections = [header, devices, shortcuts, composer, utilities]
             for section in sections {
                 stack.removeArrangedSubview(section)
                 section.removeFromSuperview()
             }
             let left = column([devices, shortcuts, composer], spacing: 8)
-            let right = column([conversation, separator(), utilities], spacing: 8)
+            let right = column([utilities], spacing: 8)
             let body = NSStackView(views: [left, right])
             body.orientation = .horizontal
             body.alignment = .top
@@ -539,14 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         statusPopover.contentViewController = controller
         statusPopover.contentSize = container.frame.size
         container.layoutSubtreeIfNeeded()
-        if restoreChatFocus {
-            inlineChat.focusInput()
-            DispatchQueue.main.async { [weak self, weak container] in
-                guard let self, let container, self.statusPopover.contentViewController?.view === container,
-                      container.window?.isKeyWindow == true else { return }
-                self.inlineChat.focusInput()
-            }
-        } else if restoreEditorFocus {
+        if restoreEditorFocus {
             menuMessageView.setSelectedRange(selection)
             container.window?.makeFirstResponder(menuMessageView)
             DispatchQueue.main.async { [weak self, weak container] in
@@ -593,7 +456,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             selectedPopoverPeerIDs.insert(sender.peerID)
         }
         sender.isChosen = selectedPopoverPeerIDs.contains(sender.peerID)
-        inlineChat.setRecipients(peers.filter { selectedPopoverPeerIDs.contains($0.id) }.map(\.name))
         menuSendButton.isEnabled = !selectedPopoverPeerIDs.isEmpty
         menuSendButton.needsDisplay = true
         for button in popoverQuickButtons {
@@ -881,12 +743,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     }
 
     private func createComposerWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 960),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 660),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "全屏消息"
         window.center()
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 660, height: 880)
+        window.contentMinSize = NSSize(width: 660, height: 620)
         let root = NSView()
         window.contentView = root
 
@@ -942,25 +804,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         copyUninstallButton.target = self
         copyUninstallButton.action = #selector(copyUninstallCommand)
         copyUninstallButton.bezelStyle = .rounded
-        chatHistoryView.isEditable = false
-        chatHistoryView.isSelectable = true
-        chatHistoryView.font = .systemFont(ofSize: 14)
-        chatHistoryView.textContainerInset = NSSize(width: 10, height: 9)
-        chatHistoryView.string = "临时聊天记录将在这里显示。\n"
-        let chatScroll = NSScrollView()
-        chatScroll.hasVerticalScroller = true
-        chatScroll.borderType = .bezelBorder
-        chatScroll.documentView = chatHistoryView
-        chatScroll.heightAnchor.constraint(equalToConstant: 188).isActive = true
-        chatInputField.placeholderString = "输入聊天内容，按回车发送"
-        chatInputField.target = self
-        chatInputField.action = #selector(sendChatMessage)
-        chatInputField.delegate = self
-        chatSendButton.target = self
-        chatSendButton.action = #selector(sendChatMessage)
-        chatSendButton.bezelStyle = .rounded
-        chatSendButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
-        chatSendButton.isEnabled = false
         statusLabel.textColor = .secondaryLabelColor
 
         let grid = NSGridView(views: [[label("本机名称"), nameField], [label("接收电脑"), peerPopup]])
@@ -978,10 +821,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         settingsRow.orientation = .horizontal
         settingsRow.distribution = .fillEqually
         settingsRow.spacing = 12
-        let historyButton = NSButton(title: "查看消息历史", target: self, action: #selector(showHistory))
-        historyButton.bezelStyle = .rounded
-        historyButton.controlSize = .large
-        settingsRow.addArrangedSubview(historyButton)
         let restartLabel = label("重启命令")
         let restartRow = NSStackView(views: [restartCommandField, copyRestartButton])
         restartRow.orientation = .horizontal
@@ -994,36 +833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         uninstallRow.spacing = 10
         uninstallCommandField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         copyUninstallButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
-        let chatLabel = label("临时聊天")
-        let chatHeader = NSStackView(views: [chatLabel, chatUnreadDot])
-        chatHeader.orientation = .horizontal
-        chatHeader.alignment = .centerY
-        chatHeader.spacing = 8
-        chatUnreadDot.translatesAutoresizingMaskIntoConstraints = false
-        chatUnreadDot.widthAnchor.constraint(equalToConstant: 10).isActive = true
-        chatUnreadDot.heightAnchor.constraint(equalToConstant: 10).isActive = true
-        chatPrivacyView.onInteraction = { [weak self] in self?.scheduleChatRead() }
-        let chatInputRow = NSStackView(views: [chatInputField, chatSendButton])
-        chatInputRow.orientation = .horizontal
-        chatInputRow.spacing = 10
-        chatInputField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        chatPrivacyView.translatesAutoresizingMaskIntoConstraints = false
-        chatPrivacyView.addSubview(chatScroll)
-        chatPrivacyView.addSubview(chatInputRow)
-        chatScroll.translatesAutoresizingMaskIntoConstraints = false
-        chatInputRow.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            chatScroll.leadingAnchor.constraint(equalTo: chatPrivacyView.leadingAnchor),
-            chatScroll.trailingAnchor.constraint(equalTo: chatPrivacyView.trailingAnchor),
-            chatScroll.topAnchor.constraint(equalTo: chatPrivacyView.topAnchor),
-            chatInputRow.leadingAnchor.constraint(equalTo: chatPrivacyView.leadingAnchor),
-            chatInputRow.trailingAnchor.constraint(equalTo: chatPrivacyView.trailingAnchor),
-            chatInputRow.topAnchor.constraint(equalTo: chatScroll.bottomAnchor, constant: 8),
-            chatInputRow.bottomAnchor.constraint(equalTo: chatPrivacyView.bottomAnchor),
-            chatInputRow.heightAnchor.constraint(equalToConstant: 36)
-        ])
-        chatPrivacyView.keepShieldOnTop()
-        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, chatHeader, chatPrivacyView, settingsLabel, settingsRow, restartLabel, restartRow, uninstallLabel, uninstallRow, statusLabel])
+        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, settingsLabel, settingsRow, restartLabel, restartRow, uninstallLabel, uninstallRow, statusLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 13
@@ -1031,8 +841,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         stack.setCustomSpacing(22, after: subtitle)
         stack.setCustomSpacing(5, after: messageLabel)
         stack.setCustomSpacing(20, after: buttonRow)
-        stack.setCustomSpacing(5, after: chatHeader)
-        stack.setCustomSpacing(20, after: chatPrivacyView)
         stack.setCustomSpacing(5, after: settingsLabel)
         stack.setCustomSpacing(15, after: settingsRow)
         stack.setCustomSpacing(5, after: restartLabel)
@@ -1045,8 +853,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            chatPrivacyView.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            chatPrivacyView.heightAnchor.constraint(equalToConstant: 232),
             settingsRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             settingsRow.heightAnchor.constraint(equalToConstant: 42),
             restartRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -1054,45 +860,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             uninstallRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             uninstallRow.heightAnchor.constraint(equalToConstant: 34)
         ])
-        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-            self?.chatPrivacyView.conceal()
-        }
-    }
-
-    private func createHistoryWindow() {
-        historyWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
-                                 styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        historyWindow.title = "消息历史"
-        historyWindow.center()
-        historyWindow.isReleasedWhenClosed = false
-        historyView.isEditable = false
-        historyView.isSelectable = true
-        historyView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        historyView.textContainerInset = NSSize(width: 16, height: 16)
-        let scroll = NSScrollView(frame: historyWindow.contentView?.bounds ?? .zero)
-        scroll.autoresizingMask = [.width, .height]
-        scroll.hasVerticalScroller = true
-        scroll.documentView = historyView
-        historyWindow.contentView?.addSubview(scroll)
-        historyStore.onChange = { [weak self] in self?.refreshHistory() }
-        refreshHistory()
-    }
-
-    @objc private func showHistory() {
-        refreshHistory()
-        NSApp.activate(ignoringOtherApps: true)
-        historyWindow.makeKeyAndOrderFront(nil)
-    }
-
-    private func refreshHistory() {
-        historyView.string = historyStore.formattedText()
     }
 
     private var localDisplayName: String { nameField.stringValue.isEmpty ? "本机" : nameField.stringValue }
-
-    private func addHistory(id: UUID, direction: String, sender: String, recipients: String, text: String, status: String) {
-        historyStore.add(MessageHistoryEntry(id: id, date: Date(), direction: direction, sender: sender, recipients: recipients, text: text, status: status))
-    }
 
     private func label(_ text: String) -> NSTextField {
         let field = NSTextField(labelWithString: text)
@@ -1105,7 +875,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         messenger.onPeersChanged = { [weak self] peers in self?.updatePeers(peers) }
         messenger.onMessage = { [weak self] message in
             switch message.kind {
-            case "chat": self?.showIncomingChat(message)
             case "accepted", "rejected": self?.handleMessageResponse(message)
             case nil, "alert": self?.showIncoming(message)
             default: break
@@ -1117,10 +886,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
-        if field === chatInputField {
-            chatPrivacyView.keyboardActive = false
-            return
-        }
         guard field === nameField else { return }
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
@@ -1129,25 +894,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         messenger.start()
     }
 
-    func controlTextDidBeginEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField, field === chatInputField else { return }
-        chatPrivacyView.keyboardActive = true
-    }
-
     private func updatePeers(_ discoveredPeers: [Peer]) {
         let oldIndex = peerPopup.indexOfSelectedItem - 1
         let selectedHomeID = peers.indices.contains(oldIndex) ? peers[oldIndex].id : nil
         let hadNoSelection = peerPopup.indexOfSelectedItem < 0 && !peers.isEmpty
+        let previousIDs = Set(peers.map(\.id))
         advertisedPeers = discoveredPeers
         let peers = peerNameStore.renamed(discoveredPeers)
         self.peers = peers
-        selectedPopoverPeerIDs.formIntersection(Set(peers.map(\.id)))
+        let onlineIDs = Set(peers.map(\.id))
+        selectedPopoverPeerIDs.formIntersection(onlineIDs)
+        // Select newly online devices without undoing manual choices on refresh.
+        selectedPopoverPeerIDs.formUnion(onlineIDs.subtracting(previousIDs))
         peerPopup.removeAllItems()
         if peers.isEmpty {
             peerPopup.addItem(withTitle: "暂未发现其他电脑")
             peerPopup.isEnabled = false
             sendButton.isEnabled = false
-            chatSendButton.isEnabled = false
         } else {
             peerPopup.addItem(withTitle: "所有电脑（\(peers.count) 台）")
             peers.forEach { peerPopup.addItem(withTitle: $0.name) }
@@ -1162,7 +925,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             }
             peerPopup.isEnabled = true
             sendButton.isEnabled = true
-            chatSendButton.isEnabled = true
         }
         rebuildStatusMenu()
     }
@@ -1185,19 +947,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         var failureDetails: [String] = []
         for peer in targets {
             let messageID = UUID()
-            addHistory(id: messageID, direction: "发送", sender: localDisplayName, recipients: peer.name, text: text, status: "正在发送")
             messenger.send(text: text, messageID: messageID, to: peer.endpoint) { [weak self] result in
                 guard let self else { return }
                 switch result {
                 case .failure(let error):
                     failures += 1
                     failureDetails.append("\(peer.name)：\(error.localizedDescription)")
-                    self.historyStore.update(id: messageID, status: "发送失败：\(error.localizedDescription)")
-                case .success:
-                    // A fast human response may arrive before the transport callback.
-                    if self.historyStore.entries.first(where: { $0.id == messageID })?.status == "正在发送" {
-                        self.historyStore.update(id: messageID, status: "已送达，等待对方处理")
-                    }
+                case .success: break
                 }
                 remaining -= 1
                 guard remaining == 0 else { return }
@@ -1246,116 +1002,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         return true
     }
 
-    @objc private func sendChatMessage() {
-        let text = chatInputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let index = peerPopup.indexOfSelectedItem
-        guard !text.isEmpty, !peers.isEmpty, index >= 0 else { NSSound.beep(); return }
-        let targets: [Peer]
-        if index == 0 { targets = peers }
-        else {
-            guard peers.indices.contains(index - 1) else { return }
-            targets = [peers[index - 1]]
-        }
-        chatSendButton.isEnabled = false
-        sendTemporaryChat(text, to: targets) { [weak self] success in
-            guard let self else { return }
-            self.chatSendButton.isEnabled = !self.peers.isEmpty
-            if success && self.chatInputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) == text {
-                self.chatInputField.stringValue = ""
-            }
-        }
-    }
-
-    private func sendTemporaryChat(_ text: String, to targets: [Peer], completion: @escaping (Bool) -> Void) {
-        guard !targets.isEmpty, !text.isEmpty else {
-            setChatStatus("请先选择接收电脑")
-            completion(false)
-            return
-        }
-        var remaining = targets.count
-        var delivered: [String] = []
-        for peer in targets {
-            let messageID = UUID()
-            addHistory(id: messageID, direction: "发送聊天", sender: localDisplayName, recipients: peer.name, text: text, status: "正在发送")
-            messenger.send(text: text, kind: "chat", messageID: messageID, to: peer.endpoint) { [weak self] result in
-                guard let self else { return }
-                switch result {
-                case .success:
-                    delivered.append(peer.name)
-                    self.historyStore.update(id: messageID, status: "已送达")
-                case .failure:
-                    self.historyStore.update(id: messageID, status: "发送失败")
-                }
-                remaining -= 1
-                guard remaining == 0 else { return }
-                if !delivered.isEmpty {
-                    self.appendChatLine(sender: "我 → \(delivered.joined(separator: "、"))", text: text, incoming: false)
-                }
-                let failures = targets.count - delivered.count
-                self.setChatStatus(failures == 0 ? "聊天消息已送达" : "聊天发送失败：\(failures) 台未确认，请重试")
-                completion(failures == 0)
-            }
-        }
-    }
-
-    private func setChatStatus(_ text: String) {
-        lastStatus = text
-        statusLabel.stringValue = text
-        popoverStatusLabel.stringValue = text
-        popoverStatusLabel.toolTip = text
-        updateStatusItemIcon()
-    }
-
-    private func showIncomingChat(_ message: WireMessage) {
-        guard pendingStore.add(message) else { return }
-        addHistory(id: message.id, direction: "收到聊天", sender: peerNameStore.displayName(for: message), recipients: localDisplayName, text: message.text, status: "未读")
-        appendChatLine(sender: peerNameStore.displayName(for: message), text: message.text, incoming: true, date: message.sentAt)
-        setChatStatus("收到 \(peerNameStore.displayName(for: message)) 的聊天消息")
-        refreshUnreadIndicators()
-        scheduleChatRead()
-    }
-
-    private func scheduleChatRead() {
-        // Let the conversation render before checking whether it is actually visible.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.clearUnreadChatIfVisible()
-        }
-    }
-
-    private func clearUnreadChatIfVisible() {
-        guard presentationAvailability.canPresent else { return }
-        let homeReadable = chatPrivacyView.isRevealed
-            && chatHistoryView.enclosingScrollView?.isFullyVisibleInActiveWindow == true
-        guard homeReadable || inlineChat.isReadable else { return }
-        for message in pendingStore.chatMessages { historyStore.update(id: message.id, status: "已读") }
-        pendingStore.removeChatMessages()
-        refreshUnreadIndicators()
-    }
-
     private func refreshUnreadIndicators() {
-        if pendingStore.chatMessages.isEmpty { chatUnreadDot.clear() }
-        else { chatUnreadDot.startBlinking() }
-        inlineChat.setUnreadCount(pendingStore.chatMessages.count)
         pendingAlertButton?.title = "待查看全屏消息 · \(pendingStore.alertMessages.count) 条"
         pendingAlertButton?.isEnabled = !pendingStore.alertMessages.isEmpty
         updateStatusItemIcon()
-    }
-
-    private func appendChatLine(sender: String, text: String, incoming: Bool, date: Date = Date()) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        let header = "[\(formatter.string(from: date))] \(sender)\n"
-        let entry = NSMutableAttributedString(string: header, attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-            .foregroundColor: incoming ? NSColor.systemBlue : NSColor.systemGreen
-        ])
-        entry.append(NSAttributedString(string: "\(text)\n\n", attributes: [
-            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor
-        ]))
-        temporaryChatTranscript.append(entry)
-        chatHistoryView.textStorage?.setAttributedString(temporaryChatTranscript)
-        chatHistoryView.scrollToEndOfDocument(nil)
-        inlineChat.setTranscript(temporaryChatTranscript)
     }
 
     @objc private func deleteCustomMessage(_ sender: NSMenuItem) {
@@ -1376,7 +1026,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     private func showIncoming(_ message: WireMessage) {
         guard pendingStore.add(message) else { return }
-        addHistory(id: message.id, direction: "收到", sender: peerNameStore.displayName(for: message), recipients: localDisplayName, text: message.text, status: "等待处理")
         refreshUnreadIndicators()
         setStatus("收到 \(peerNameStore.displayName(for: message)) 的全屏消息，等待查看")
         if presentationAvailability.canPresent {
@@ -1392,8 +1041,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             activeAlert?.suspend()
             activeAlert = nil
             activeAlertID = nil
-            inlineChat.conceal()
-            chatPrivacyView.conceal()
             statusPopover.performClose(nil)
         }
         // Unlocking never implies reading and does not unexpectedly cover the desktop.
@@ -1453,7 +1100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         pendingStore.remove(id: message.id)
         liveAlertQueue.removeAll { $0 == message.id }
         if activeAlertID == message.id { activeAlert = nil; activeAlertID = nil }
-        historyStore.update(id: message.id, status: accepted ? "已收到" : "已拒绝")
         refreshUnreadIndicators()
         setStatus(pendingStore.alertMessages.isEmpty ? "全屏消息已处理" : "还有 \(pendingStore.alertMessages.count) 条全屏消息待查看")
         scheduleNextLiveAlert()
@@ -1467,14 +1113,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     }
 
     private func handleMessageResponse(_ message: WireMessage) {
-        guard let relatedID = message.relatedMessageID else { return }
+        guard message.relatedMessageID != nil else { return }
         let accepted = message.kind == "accepted"
         let name = peerNameStore.displayName(for: message)
         let result = "\(name) \(accepted ? "已收到" : "已拒绝")"
-        let originalText = historyStore.entries.first(where: { $0.id == relatedID })?.text ?? ""
-        historyStore.update(id: relatedID, status: accepted ? "对方已收到" : "对方已拒绝")
         setStatus(result, success: accepted)
-        showSendToast(message: originalText, recipients: name, failures: 0,
+        showSendToast(message: "", recipients: name, failures: 0,
                       titleOverride: result, detailOverride: "全屏消息回执", responseAccepted: accepted)
     }
 
@@ -1657,7 +1301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         button.title = ""
         button.image = StatusItemLogo.templateImage(unreadCount: count)
         statusBadgeView.unreadCount = count
-        let description = count > 0 ? "全屏消息，\(count) 条未读（聊天 \(pendingStore.chatMessages.count)，全屏 \(pendingStore.alertMessages.count)）" : "全屏消息"
+        let description = count > 0 ? "全屏消息，\(count) 条未读" : "全屏消息"
         button.toolTip = "\(description)\n\(lastStatus)"
         button.setAccessibilityLabel(description)
     }

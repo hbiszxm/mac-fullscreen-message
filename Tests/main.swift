@@ -57,12 +57,12 @@ sendResult = nil
 if let peer = sender.peers.first(where: { $0.id == receiverPeerID }) {
     sender.send(text: "临时聊天测试", kind: "chat", to: peer.endpoint) { result in sendResult = result }
 }
-let chatDeadline = Date().addingTimeInterval(6)
-while Date() < chatDeadline, (sendResult == nil || receivedText == nil) {
+let chatDeadline = Date().addingTimeInterval(15)
+while Date() < chatDeadline, sendResult == nil {
     RunLoop.main.run(until: Date().addingTimeInterval(0.05))
 }
-guard receivedText == "临时聊天测试", receivedKind == "chat", case .success? = sendResult else {
-    fputs("临时聊天发送或类型识别失败\n", stderr)
+guard receivedText == nil, receivedKind == nil, case .failure? = sendResult else {
+    fputs("旧聊天未被正确拒绝\n", stderr)
     exit(3)
 }
 
@@ -90,4 +90,4 @@ guard peerCameBack else {
     fputs("接收端重启后未重新上线\n", stderr)
     exit(5)
 }
-print("自动发现、全屏消息、临时聊天、处理结果返回、确认、移除和重启重新上线均成功")
+print("自动发现、全屏消息、拒绝旧聊天、处理结果返回、确认、移除和重启重新上线均成功")

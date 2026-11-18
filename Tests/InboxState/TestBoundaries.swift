@@ -66,15 +66,6 @@ final class FullScreenAlertController {
     }
 }
 
-/// An un-ordered window with injectable visibility. This tests the actual
-/// production view visibility checks without showing a window or taking focus.
-final class InboxReadableWindow: NSWindow {
-    var simulatedReadable = false
-    override var isKeyWindow: Bool { simulatedReadable }
-    override var isVisible: Bool { simulatedReadable }
-    override var occlusionState: NSWindow.OcclusionState { simulatedReadable ? [.visible] : [] }
-}
-
 var inboxTestResponses: [(UUID, Bool)] = []
 func inboxTestRespond(to message: WireMessage, accepted: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
     inboxTestResponses.append((message.id, accepted))

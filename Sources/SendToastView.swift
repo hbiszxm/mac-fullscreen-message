@@ -1,7 +1,7 @@
 import AppKit
 
 /// A compact, non-interactive delivery banner. Long content stays a preview;
-/// the complete message and delivery details remain in history.
+/// Receipt banners show the sender alias and handling result.
 final class SendToastView: NSView {
     private let material = NSVisualEffectView()
     private var maskSize = NSSize.zero

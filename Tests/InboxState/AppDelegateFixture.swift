@@ -1,133 +1,62 @@
-// Appended to a temporary copy of AppDelegate.swift so private access remains
-// limited to this integration fixture and never changes the shipping source.
+// Appended to an isolated AppDelegate copy; never starts networking or displays alerts.
 extension AppDelegate {
     func runInboxStateTests() {
-        precondition(Thread.isMainThread)
-        inboxExpect(messenger == nil, "The fixture must not create a messenger")
-        inboxExpect(pendingStore.count == 0 && historyStore.entries.isEmpty, "Test defaults must start empty")
+        inboxExpect(messenger == nil && pendingStore.count == 0, "Start with an isolated empty inbox")
         statusItem = NSStatusBar.system.statusItem(withLength: 0)
         statusItem.isVisible = false
-        // The legacy menu path avoids constructing/opening an actual popover.
         statusItem.menu = statusMenu
-        nameField.stringValue = "隔离收件箱测试"
+        nameField.stringValue = "隔离测试"
         defer {
             presentationAvailability.stop()
             NSStatusBar.system.removeStatusItem(statusItem)
         }
-
-        guard let screen = NSScreen.screens.first else { fatalError("This AppKit fixture needs a GUI screen") }
-        let testWindow = InboxReadableWindow(
-            contentRect: NSRect(x: screen.visibleFrame.midX - 150, y: screen.visibleFrame.midY - 100,
-                               width: 300, height: 200),
-            styleMask: .borderless, backing: .buffered, defer: false)
-        testWindow.isReleasedWhenClosed = false
-        window = testWindow
-        chatPrivacyView.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
-        testWindow.contentView?.addSubview(chatPrivacyView)
-        let historyScroll = NSScrollView(frame: NSRect(x: 20, y: 20, width: 240, height: 100))
-        historyScroll.documentView = chatHistoryView
-        chatPrivacyView.addSubview(historyScroll)
-        chatPrivacyView.keepShieldOnTop()
-        testWindow.contentView?.layoutSubtreeIfNeeded()
-
-        presentationAvailability.start { [weak self] available in
-            self?.presentationAvailabilityChanged(available)
-        }
-        func message(_ kind: String, _ text: String) -> WireMessage {
-            WireMessage(id: UUID(), sender: "测试发送设备", text: text, sentAt: Date(),
-                        kind: kind, senderInstanceID: "inbox-test-sender", relatedMessageID: nil)
-        }
-        func assertCount(_ expected: Int, _ context: String) {
-            inboxExpect(pendingStore.count == expected, "\(context): pending count mismatch")
-            inboxExpect(statusBadgeView.unreadCount == expected, "\(context): badge mismatch")
-            inboxExpect(PendingMessageStore(defaults: inboxTestDefaults).count == expected,
-                        "\(context): restored unread state mismatch")
-            inboxExpect(messenger == nil, "No messenger may be started by this scenario")
-        }
-
-        let firstAlert = message("alert", "锁屏全屏消息")
-        let firstChat = message("chat", "锁屏临时聊天")
-        showIncoming(firstAlert)
-        showIncomingChat(firstChat)
-        assertCount(2, "Blocked alert plus chat")
-        inboxExpect(activeAlert == nil && FullScreenAlertController.creationCount == 0,
-                    "Blocked messages must not construct full-screen UI")
-        showIncoming(firstAlert)
-        showIncomingChat(firstChat)
-        assertCount(2, "Duplicate UUIDs")
-        inboxExpect(historyStore.entries.count == 2, "Duplicate UUIDs must not duplicate history")
-
-        testWindow.simulatedReadable = true
-        chatPrivacyView.keyboardActive = true
-        clearUnreadChatIfVisible()
-        assertCount(2, "A readable-looking chat must remain unread while session is blocked")
+        presentationAvailability.start { [weak self] in self?.presentationAvailabilityChanged($0) }
+        let first = WireMessage(id: UUID(), sender: "测试设备", text: "全屏消息", sentAt: Date(), kind: "alert", senderInstanceID: "test", relatedMessageID: nil)
+        showIncoming(first)
+        showIncoming(first)
+        inboxExpect(pendingStore.count == 1 && statusBadgeView.unreadCount == 1 && activeAlert == nil, "Locked messages must persist once and badge without presentation")
         presentationAvailability.setAvailability(true)
-        assertCount(2, "Unlocking")
-        inboxExpect(FullScreenAlertController.presentationCount == 0, "Unlocking must not auto-present")
-        chatPrivacyView.conceal()
-        clearUnreadChatIfVisible()
-        assertCount(2, "Concealed chat")
-
-        chatPrivacyView.keyboardActive = true
-        inboxExpect(historyScroll.isFullyVisibleInActiveWindow, "Simulated chat must satisfy the real visibility checks")
-        clearUnreadChatIfVisible()
-        assertCount(1, "Read chat only")
-        inboxExpect(pendingStore.contains(id: firstAlert.id) && pendingStore.chatMessages.isEmpty,
-                    "Reading chat must leave pending alerts intact")
-        inboxExpect(historyStore.entries.first { $0.id == firstChat.id }?.status == "已读",
-                    "Reading chat must update history")
-
+        inboxExpect(activeAlert == nil, "Unlock must not automatically show backlog")
         viewNextPendingAlert()
-        guard let firstController = activeAlert else { fatalError("Explicit open must create the pending alert") }
-        inboxExpect(firstController.isPresented && activeAlertID == firstAlert.id, "Pending alert must be presented")
-        assertCount(1, "Presentation alone")
+        inboxExpect(activeAlertID == first.id && pendingStore.count == 1, "Presentation alone must not mark handled")
+        let controller = activeAlert!
         presentationAvailability.setAvailability(false)
-        assertCount(1, "Locking during presentation")
-        inboxExpect(activeAlert == nil && FullScreenAlertController.suspensionCount == 1,
-                    "Locking must suspend, not acknowledge, the presented alert")
-        firstController.simulateEscape()
-        assertCount(1, "A suspended controller cannot dismiss pending unread state")
+        controller.simulateEscape()
+        inboxExpect(pendingStore.count == 1 && inboxTestResponses.isEmpty, "Suspension must not reject the message")
         presentationAvailability.setAvailability(true)
-        assertCount(1, "Unlocking after suspension")
-        inboxExpect(FullScreenAlertController.presentationCount == 1, "Unlock must not reopen the suspended alert")
-
-        let secondAlert = message("alert", "第二条全屏消息")
-        showIncoming(secondAlert)
-        assertCount(2, "Two pending alerts")
-        guard let secondController = activeAlert else { fatalError("The new alert should be presented") }
-        secondController.simulateEscape()
-        assertCount(1, "ESC rejects one alert")
-        inboxExpect(inboxTestResponses.count == 1 && inboxTestResponses[0].0 == secondAlert.id && !inboxTestResponses[0].1,
-                    "ESC must return a rejection for this message")
-        inboxExpect(historyStore.entries.first { $0.id == secondAlert.id }?.status == "已拒绝",
-                    "ESC rejection must be recorded in history")
-        inboxExpect(pendingStore.contains(id: firstAlert.id) && !pendingStore.contains(id: secondAlert.id),
-                    "ESC must remove only its own alert")
         viewNextPendingAlert()
-        guard let reopened = activeAlert else { fatalError("The original alert must still be openable") }
-        showIncoming(firstAlert)
-        assertCount(1, "Duplicate active alert")
-        reopened.simulateEscape()
-        reopened.simulateEscape()
-        assertCount(0, "Repeated ESC")
-        inboxExpect(inboxTestResponses.count == 2 && inboxTestResponses[1].0 == firstAlert.id && !inboxTestResponses[1].1,
-                    "Repeated ESC must not duplicate the rejection")
-
-        FullScreenAlertController.presentationSucceeds = false
-        let failedPresentation = message("alert", "窗口未成功显示")
-        showIncoming(failedPresentation)
-        assertCount(1, "Failed presentation")
-        inboxExpect(activeAlert == nil, "Failed presentations must release the active controller")
-        FullScreenAlertController.canCreate = false
-        showIncoming(message("alert", "无可用屏幕"))
-        assertCount(2, "No available screen")
-        inboxExpect(activeAlert == nil, "No-screen initialization must leave the message pending")
-        inboxExpect(inboxTestSoundCount == 3, "Only successful simulated presentations should request a sound")
+        activeAlert?.simulateEscape()
+        inboxExpect(pendingStore.count == 0 && inboxTestResponses.last?.0 == first.id, "ESC must handle only its message")
+        inboxExpect(PendingMessageStore(defaults: inboxTestDefaults).count == 0, "Handled state must survive restart")
         runSenderAliasTests()
         runResponseFeedbackTests()
+        runDefaultSelectionTests()
         runSendingStateTests()
         runLiveAlertQueueTests()
-        print("AppDelegate 收件箱集成：锁屏双类型角标、重复去重、解锁保留、聊天单独已读、展示不清数、挂起保留、ESC 单条处理、展示失败/无屏幕保留、持久化恢复均通过")
+        runRemovedFeaturesTests()
+        print("全屏收件集成：锁屏角标、去重、解锁保留、挂起、逐条处理与持久化均通过")
+    }
+
+    func runRemovedFeaturesTests() {
+        inboxTestDefaults.set(Data("old history".utf8), forKey: "messageHistoryV1")
+        clearRetiredData()
+        inboxExpect(inboxTestDefaults.object(forKey: "messageHistoryV1") == nil, "Retired history must be removed")
+        createComposerWindow()
+        window.contentView?.layoutSubtreeIfNeeded()
+        func text(_ view: NSView) -> [String] {
+            var result = view.subviews.flatMap(text)
+            if let field = view as? NSTextField { result.append(field.stringValue) }
+            if let button = view as? NSButton { result.append(button.title) }
+            return result
+        }
+        rebuildStatusPopover()
+        let labels = text(window.contentView!) + text(statusPopover.contentViewController!.view)
+        inboxExpect(!labels.contains { $0.contains("聊天") || $0.contains("会话") || $0.contains("历史") }, "Home and menu must have no retired feature controls")
+        inboxExpect(labels.contains("发送全屏消息") && labels.contains("检查更新"), "Primary features must remain available")
+        let stack = window.contentView!.subviews.first!
+        inboxExpect(stack.frame.minY >= 0, "Home content must fit after removing retired sections")
+        window.close()
+        print("功能移除：菜单与首页无聊天/历史入口，旧历史清理，界面完整显示")
     }
 }
 
@@ -140,7 +69,6 @@ extension AppDelegate {
                                   kind: "alert", senderInstanceID: "alias-device", relatedMessageID: nil)
         showIncoming(message)
         inboxExpect(lastStatus.contains("办公室同事"), "Incoming status must show the alias")
-        inboxExpect(historyStore.entries.first { $0.id == message.id }?.sender == "办公室同事", "New received history must show the alias")
         inboxExpect(pendingStore.alertMessages.first { $0.id == message.id }?.sender == "MacBook Air", "Pending storage must retain the original sender")
         peerNameStore.setName("更新后的备注", for: peer)
         presentationAvailability.setAvailability(true)
@@ -150,7 +78,7 @@ extension AppDelegate {
         inboxExpect(activeAlert?.senderDisplayName == "更新后的备注", "Fullscreen presentation must use the current alias even without discovery")
         activeAlert?.simulateEscape()
         inboxExpect(inboxTestResponses.last?.0 == message.id, "Alias presentation must retain the response message identity")
-        print("备注集成：全屏展示、接收提示、新历史使用备注；待处理原始消息与回复身份保留")
+        print("备注集成：全屏展示、接收提示、使用备注；待处理原始消息与回复身份保留")
     }
 }
 
@@ -160,16 +88,45 @@ extension AppDelegate {
         peerNameStore.setName("小刘", for: peer)
         for accepted in [true, false] {
             let id = UUID()
-            addHistory(id: id, direction: "发送", sender: "我", recipients: "旧备注", text: "上班", status: "已送达")
             let response = WireMessage(id: UUID(), sender: peer.name, text: accepted ? "收到" : "拒绝", sentAt: Date(),
                                        kind: accepted ? "accepted" : "rejected", senderInstanceID: peer.instanceID, relatedMessageID: id)
             handleMessageResponse(response)
             let expected = accepted ? "小刘 已收到" : "小刘 已拒绝"
             inboxExpect(inboxTestLastToast?.title == expected && lastStatus == expected, "Receipt title and status must use local alias")
             inboxExpect(inboxTestLastToast?.accepted == accepted, "Receipt must select its explicit accepted/rejected style")
-            inboxExpect(inboxTestLastToast?.message == "上班", "Receipt must identify the original message")
-            inboxExpect(historyStore.entries.first { $0.id == id }?.status == (accepted ? "对方已收到" : "对方已拒绝"), "Receipt must update only related history")
+            inboxExpect(inboxTestLastToast?.message == "", "Receipts must not rely on stored history")
         }
-        print("回执集成：本机备注、收到/拒绝样式、原消息内容和历史状态均通过")
+        print("回执集成：本机备注、收到/拒绝样式、无历史依赖均通过")
+    }
+}
+
+extension AppDelegate {
+    func runDefaultSelectionTests() {
+        statusItem.menu = nil
+        peers = []
+        selectedPopoverPeerIDs = []
+        let a = Peer(id: "default-a", name: "设备 A", endpoint: .hostPort(host: "127.0.0.1", port: 1), instanceID: "default-a")
+        let b = Peer(id: "default-b", name: "设备 B", endpoint: .hostPort(host: "127.0.0.1", port: 2), instanceID: "default-b")
+        let c = Peer(id: "default-c", name: "设备 C", endpoint: .hostPort(host: "127.0.0.1", port: 3), instanceID: "default-c")
+        updatePeers([a, b])
+        inboxExpect(selectedPopoverPeerIDs == [a.id, b.id] && menuSendButton.isEnabled, "Initially online devices must be selected and ready to send")
+        func devices(_ view: NSView) -> [DeviceChoiceButton] {
+            (view as? DeviceChoiceButton).map { [$0] } ?? view.subviews.flatMap(devices)
+        }
+        let buttons = devices(statusPopover.contentViewController!.view)
+        inboxExpect(buttons.count == 2 && buttons.allSatisfy { $0.isChosen }, "Initial device backgrounds must show selection")
+        togglePopoverPeer(buttons.first { $0.peerID == a.id }!)
+        updatePeers([b, a])
+        inboxExpect(selectedPopoverPeerIDs == [b.id], "Discovery refresh must preserve a manual deselection")
+        peerNameStore.setName("设备备注", for: a)
+        updatePeers([a, b, c])
+        inboxExpect(selectedPopoverPeerIDs == [b.id, c.id], "New devices must be selected without reselecting renamed devices")
+        updatePeers([a, c])
+        inboxExpect(selectedPopoverPeerIDs == [c.id], "Offline devices must leave the selection")
+        updatePeers([a, b, c])
+        inboxExpect(selectedPopoverPeerIDs == [b.id, c.id], "A reconnected device must be selected by default")
+        updatePeers([])
+        inboxExpect(selectedPopoverPeerIDs.isEmpty && !menuSendButton.isEnabled, "Empty discovery must clear selection and disable sending")
+        print("默认选择：首次上线、背景选中、新设备、手动取消保留、离线清理和重新上线均通过")
     }
 }

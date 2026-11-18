@@ -221,6 +221,10 @@ final class LANMessenger {
                           let message = try? JSONDecoder().decode(WireMessage.self, from: body) else {
                         connection.cancel(); return
                     }
+                    guard message.kind == nil || ["alert", "accepted", "rejected"].contains(message.kind!) else {
+                        connection.send(content: Data("NO".utf8), completion: .contentProcessed { _ in connection.cancel() })
+                        return
+                    }
                     DispatchQueue.main.async {
                         // The receiver persists unread messages synchronously. Confirm delivery
                         // only after that handler returns, including when a retry arrives first.

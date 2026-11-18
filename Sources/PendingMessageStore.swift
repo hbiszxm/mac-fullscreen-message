@@ -1,6 +1,6 @@
 import Foundation
 
-/// Received messages remain unread until the user views their chat or handles an alert.
+/// Received fullscreen messages remain unread until the user handles them.
 /// Keep the full payload so pending messages survive an application update or restart.
 final class PendingMessageStore {
     private let key = "pendingMessagesV1"
@@ -8,7 +8,6 @@ final class PendingMessageStore {
     private(set) var messages: [WireMessage] = []
 
     var count: Int { messages.count }
-    var chatMessages: [WireMessage] { messages.filter { $0.kind == "chat" } }
     var alertMessages: [WireMessage] { messages.filter { $0.kind == nil || $0.kind == "alert" } }
 
     init(defaults: UserDefaults = .standard) {
@@ -17,6 +16,7 @@ final class PendingMessageStore {
               let saved = try? JSONDecoder().decode([WireMessage].self, from: data) else { return }
         var seen: Set<UUID> = []
         messages = saved.filter { Self.isInboxMessage($0) && seen.insert($0.id).inserted }
+        if messages.count != saved.count { save(messages) }
     }
 
     func contains(id: UUID) -> Bool {
@@ -34,13 +34,8 @@ final class PendingMessageStore {
         save(messages.filter { $0.id != id })
     }
 
-    func removeChatMessages() {
-        guard messages.contains(where: { $0.kind == "chat" }) else { return }
-        save(messages.filter { $0.kind != "chat" })
-    }
-
     private static func isInboxMessage(_ message: WireMessage) -> Bool {
-        message.kind == nil || message.kind == "alert" || message.kind == "chat"
+        message.kind == nil || message.kind == "alert"
     }
 
     @discardableResult
