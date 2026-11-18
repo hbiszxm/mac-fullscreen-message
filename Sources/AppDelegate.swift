@@ -7,10 +7,6 @@ private final class SendChoice: NSObject {
     init(text: String, peerID: String?) { self.text = text; self.peerID = peerID }
 }
 
-private final class QuickMessageButton: PopoverButton {
-    var messageText = ""
-}
-
 private final class PayloadButton: PopoverButton {
     var payload = ""
 }
@@ -61,6 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private let peerNameStore = PeerNameStore()
     private var advertisedPeers: [Peer] = []
     private var popoverQuickButtons: [QuickMessageButton] = []
+    private let quickMessageOrder = QuickMessageOrderStore()
+    private var quickMessageDragging = false
+    private var refreshAfterQuickDrag = false
+    private var orderedQuickMessages: [String] {
+        quickMessageOrder.messages(available: defaultMessages + customMessages)
+    }
 
     private var customMessages: [String] {
         get { UserDefaults.standard.stringArray(forKey: "customMessages") ?? [] }
@@ -130,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         statusMenu.addItem(recent)
         statusMenu.addItem(.separator())
 
-        for text in defaultMessages + customMessages {
+        for text in orderedQuickMessages {
             let root = NSMenuItem(title: "发送：\(text)", action: nil, keyEquivalent: "")
             let submenu = NSMenu(title: text)
             if peers.count > 1 {
@@ -187,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     }
 
     private func rebuildStatusPopover() {
+        guard !quickMessageDragging else { refreshAfterQuickDrag = true; return }
         let restoreEditorFocus = menuMessageView.window?.firstResponder === menuMessageView
         let selection = menuMessageView.selectedRange()
         statusPopover.delegate = self
@@ -294,14 +297,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
         popoverQuickButtons.removeAll()
         var quickRows: [NSView] = []
-        let messages = defaultMessages + customMessages
+        let messages = orderedQuickMessages
         for start in stride(from: 0, to: messages.count, by: 3) {
             var buttons: [NSView] = []
             for index in start..<min(start + 3, messages.count) {
                 let text = messages[index]
                 let quick = QuickMessageButton(title: text, target: self, action: #selector(sendQuickMessageFromPopover(_:)))
                 quick.messageText = text
-                quick.toolTip = text
+                quick.toolTip = "\(text) · 拖动调整顺序，点击发送"
+                quick.onDragBegan = { [weak self] in
+                    self?.quickMessageDragging = true
+                    self?.statusPopover.behavior = .applicationDefined
+                }
+                quick.onMove = { [weak self] source, target in
+                    guard let self else { return }
+                    if self.quickMessageOrder.move(source, to: target, available: self.defaultMessages + self.customMessages) {
+                        self.refreshAfterQuickDrag = true
+                    }
+                }
+                quick.onDragEnded = { [weak self] in
+                    guard let self else { return }
+                    self.quickMessageDragging = false
+                    self.statusPopover.behavior = .transient
+                    if self.refreshAfterQuickDrag {
+                        self.refreshAfterQuickDrag = false
+                        DispatchQueue.main.async { [weak self] in self?.rebuildStatusPopover() }
+                    }
+                }
                 quick.isEnabled = !selectedPopoverPeerIDs.isEmpty
                 if customMessages.contains(text) {
                     let menu = NSMenu()

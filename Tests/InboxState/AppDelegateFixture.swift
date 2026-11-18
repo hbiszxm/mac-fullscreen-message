@@ -33,6 +33,7 @@ extension AppDelegate {
         runDefaultSelectionTests()
         runSendingStateTests()
         runLiveAlertQueueTests()
+        runQuickMessageOrderingTests()
         runRemovedFeaturesTests()
         print("全屏收件集成：锁屏角标、去重、解锁保留、挂起、逐条处理与持久化均通过")
     }
@@ -128,5 +129,30 @@ extension AppDelegate {
         updatePeers([])
         inboxExpect(selectedPopoverPeerIDs.isEmpty && !menuSendButton.isEnabled, "Empty discovery must clear selection and disable sending")
         print("默认选择：首次上线、背景选中、新设备、手动取消保留、离线清理和重新上线均通过")
+    }
+}
+
+extension AppDelegate {
+    func runQuickMessageOrderingTests() {
+        let oldCustom = customMessages
+        customMessages = ["开会", "下班", "吃饭"]
+        rebuildStatusPopover()
+        let originalPanel = statusPopover.contentViewController
+        let source = popoverQuickButtons[0]
+        let target = popoverQuickButtons[3]
+        let sendCount = inboxTestSends.count
+        menuMessageView.string = "拖动时保留草稿"
+        source.onDragBegan?()
+        target.onMove?(source.messageText, target.messageText)
+        rebuildStatusPopover()
+        inboxExpect(statusPopover.contentViewController === originalPanel, "Do not replace drag controls before the session ends")
+        source.onDragEnded?()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        inboxExpect(popoverQuickButtons.map(\.messageText) == ["吸烟", "暗棋", "开会", "上班", "下班", "吃饭"], "Dropped order must be reflected in the visible grid")
+        inboxExpect(inboxTestSends.count == sendCount, "Dragging must not send any message")
+        inboxExpect(menuMessageView.string == "拖动时保留草稿" && !quickMessageDragging && statusPopover.behavior == .transient, "Finish must restore panel behavior and preserve draft")
+        customMessages = oldCustom
+        rebuildStatusPopover()
+        print("拖动集成：跨行排序、延迟重建、保留草稿、不触发发送与恢复面板行为均通过")
     }
 }
