@@ -5,25 +5,22 @@ extension AppDelegate {
         let peer = Peer(id: "test-peer", name: "测试电脑", endpoint: .hostPort(host: "127.0.0.1", port: 1), instanceID: "test-peer")
         peers = [peer]
         selectedPopoverPeerIDs = [peer.id]
-        peerPopup.removeAllItems()
-        peerPopup.addItem(withTitle: "所有电脑（1 台）")
-        peerPopup.selectItem(at: 0)
         rebuildStatusPopover()
         let panel = statusPopover.contentViewController
 
-        messageView.string = "第一条"
-        sendCustomMessage()
+        menuMessageView.string = "第一条"
+        sendInlineMenuMessage()
         inboxExpect(inboxTestSends.count == 1, "The first click must send")
-        messageView.string = "正在写第二条"
+        menuMessageView.string = "正在写第二条"
         inboxTestSends[0].completion(.success(()))
-        inboxExpect(messageView.string == "正在写第二条", "Completion of the first send must not erase the second draft")
+        inboxExpect(menuMessageView.string == "正在写第二条", "Completion of the first send must not erase the second draft")
         inboxExpect(statusPopover.contentViewController === panel, "Status updates must not replace controls during a click")
-        sendCustomMessage()
+        sendInlineMenuMessage()
         inboxExpect(inboxTestSends.count == 2 && inboxTestSends[1].text == "正在写第二条", "Second click must send the new draft")
         inboxTestSends[1].completion(.success(()))
-        inboxExpect(messageView.string.isEmpty, "Clear only the draft that was sent successfully")
+        inboxExpect(menuMessageView.string.isEmpty, "Clear only the draft that was sent successfully")
 
-        messageView.string = "首页未发送的草稿"
+        menuMessageView.string = "未发送的草稿"
         let quick = popoverQuickButtons[0]
         quick.performClick(nil)
         quick.performClick(nil)
@@ -31,7 +28,7 @@ extension AppDelegate {
                     "Two rapid shortcut clicks must each send a new message")
         inboxTestSends[3].completion(.success(()))
         inboxTestSends[2].completion(.failure(MessageError.connectionFailed("测试连接失败")))
-        inboxExpect(messageView.string == "首页未发送的草稿", "Shortcut results must not clear the home draft")
+        inboxExpect(menuMessageView.string == "未发送的草稿", "Shortcut results must not clear the menu draft")
         inboxExpect(lastStatus.contains("测试连接失败"), "A failed click must expose its actual failure")
 
         menuMessageView.string = "菜单第一条"

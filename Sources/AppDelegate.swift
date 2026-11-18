@@ -11,11 +11,10 @@ private final class PayloadButton: PopoverButton {
     var payload = ""
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private let statusBadgeView = StatusUnreadBadgeView()
     private let statusMenu = NSMenu()
-    private var window: NSWindow!
     private var messenger: LANMessenger!
     private var peers: [Peer] = []
     private var activeAlert: FullScreenAlertController?
@@ -27,23 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private let pendingStore = PendingMessageStore()
     private let presentationAvailability = PresentationAvailability()
     private var sendToast: NSPanel?
-    private let popoverStatusLabel = NSTextField(labelWithString: "")
     private var lastStatus = "正在启动…"
     private var activity: NSObjectProtocol?
     private var automaticUpdateTimer: Timer?
     private var updateInProgress = false
-    private let nameField = NSTextField()
-    private let peerPopup = NSPopUpButton()
-    private let messageView = NSTextView()
-    private let statusLabel = NSTextField(labelWithString: "正在启动…")
-    private let sendButton = NSButton(title: "发送全屏消息", target: nil, action: nil)
-    private let saveButton = NSButton(title: "添加到快捷列表", target: nil, action: nil)
-    private let homeUpdateButton = NSButton(title: "检查更新", target: nil, action: nil)
-    private let homeLoginCheckbox = NSButton(checkboxWithTitle: "开机自动运行", target: nil, action: nil)
-    private let restartCommandField = NSTextField(string: "pkill -x FullscreenMessage; open \"/Applications/全屏消息.app\"")
-    private let copyRestartButton = NSButton(title: "复制命令", target: nil, action: nil)
-    private let uninstallCommandField = NSTextField(string: "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/uninstall.sh?cache=$(date +%s)\" | /bin/bash")
-    private let copyUninstallButton = NSButton(title: "复制命令", target: nil, action: nil)
+    private let restartCommand = "pkill -x FullscreenMessage; open \"/Applications/全屏消息.app\""
+    private let uninstallCommand = "curl -fsSL \"https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/download/uninstall.sh?cache=$(date +%s)\" | /bin/bash"
     private let menuMessageView = PopoverMessageTextView()
     private let menuSendButton = PopoverButton(title: "发送", target: nil, action: nil)
     private let menuFavoriteButton = PopoverButton(title: "收藏", target: nil, action: nil)
@@ -76,7 +64,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             return
         }
         createStatusItem()
-        createComposerWindow()
         clearRetiredData()
         refreshUnreadIndicators()
         presentationAvailability.start { [weak self] available in
@@ -85,7 +72,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         configureMessenger()
         enableLoginItemOnFirstInstalledLaunch()
         activity = ProcessInfo.processInfo.beginActivity(options: [.automaticTerminationDisabled, .suddenTerminationDisabled], reason: "持续接收局域网消息")
-        if CommandLine.arguments.contains("--show-home") { showHome() }
         startAutomaticUpdates()
     }
 
@@ -119,19 +105,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             return
         }
         statusMenu.removeAllItems()
-        let home = NSMenuItem(title: "打开客户端", action: #selector(showHome), keyEquivalent: "")
-        home.target = self
-        statusMenu.addItem(home)
-        statusMenu.addItem(.separator())
-
-        let online = NSMenuItem(title: peers.isEmpty ? "未发现其他电脑" : "在线电脑：\(peers.count) 台", action: nil, keyEquivalent: "")
-        online.isEnabled = false
-        statusMenu.addItem(online)
-        let recent = NSMenuItem(title: "状态：\(lastStatus)", action: nil, keyEquivalent: "")
-        recent.isEnabled = false
-        statusMenu.addItem(recent)
-        statusMenu.addItem(.separator())
-
         for text in orderedQuickMessages {
             let root = NSMenuItem(title: "发送：\(text)", action: nil, keyEquivalent: "")
             let submenu = NSMenu(title: text)
@@ -247,22 +220,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             return line
         }
 
-        let open = button("打开客户端", symbol: "macwindow", action: #selector(openClientFromPopover))
-        open.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        let online = heading("在线电脑 · \(peers.count) 台")
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         let versionLabel = heading("V\(version)")
         versionLabel.alignment = .right
-        let info = NSStackView(views: [online, versionLabel])
-        info.orientation = .horizontal
-        info.distribution = .fillEqually
-        let state = popoverStatusLabel
-        state.stringValue = lastStatus
-        state.font = .systemFont(ofSize: 11)
-        state.textColor = .secondaryLabelColor
-        state.lineBreakMode = .byTruncatingTail
-        state.toolTip = lastStatus
-        let header = column([open, info, state], spacing: 7)
+        let header = column([versionLabel])
 
         selectedPopoverPeerIDs.formIntersection(Set(peers.map(\.id)))
         var deviceRows: [NSView] = []
@@ -293,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
                 deviceRows.append(row(devices))
             }
         }
-        let devices = column([heading("接收电脑"), column(deviceRows)])
+        let devices = column(deviceRows)
 
         popoverQuickButtons.removeAll()
         var quickRows: [NSView] = []
@@ -379,8 +340,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         }
         let management = button("检查更新", symbol: "arrow.triangle.2.circlepath", action: #selector(checkForUpdates))
         let commands = row([
-            command("复制重启命令", symbol: "arrow.clockwise", value: restartCommandField.stringValue),
-            command("复制卸载命令", symbol: "trash", value: uninstallCommandField.stringValue)
+            command("复制重启命令", symbol: "arrow.clockwise", value: restartCommand),
+            command("复制卸载命令", symbol: "trash", value: uninstallCommand)
         ])
         let login = button("开机自动运行", symbol: "circle", action: #selector(toggleLoginItem(_:)))
         if #available(macOS 13.0, *), SMAppService.mainApp.status == .enabled { login.symbolName = "checkmark.circle" }
@@ -462,11 +423,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         }
     }
 
-    @objc private func openClientFromPopover() {
-        statusPopover.performClose(nil)
-        showHome()
-    }
-
     @objc private func sendQuickMessageFromPopover(_ sender: QuickMessageButton) {
         let targets = peers.filter { selectedPopoverPeerIDs.contains($0.id) }
         send(sender.messageText, to: targets)
@@ -524,7 +480,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         if #available(macOS 13.0, *) {
             let state: NSControl.StateValue = SMAppService.mainApp.status == .enabled ? .on : .off
             login.state = state
-            homeLoginCheckbox.state = state
         }
         submenu.addItem(login)
         if !peers.isEmpty {
@@ -543,8 +498,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
         let commands: [(String, String)] = [
             ("复制安装/更新命令", installCommand),
-            ("复制重启命令", restartCommandField.stringValue),
-            ("复制卸载命令", uninstallCommandField.stringValue)
+            ("复制重启命令", restartCommand),
+            ("复制卸载命令", uninstallCommand)
         ]
         for (title, command) in commands {
             let item = NSMenuItem(title: title, action: #selector(copyMenuCommand(_:)), keyEquivalent: "")
@@ -765,136 +720,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         setStatus("已收藏到快捷消息", success: true)
     }
 
-    private func createComposerWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 660),
-                          styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "全屏消息"
-        window.center()
-        window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 660, height: 620)
-        let root = NSView()
-        window.contentView = root
-
-        let title = NSTextField(labelWithString: "全屏消息")
-        title.font = .systemFont(ofSize: 28, weight: .bold)
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-        let subtitle = NSTextField(wrappingLabelWithString: "V\(version) · 自动发现同一局域网内运行“全屏消息”的 Mac，无需配对。")
-        subtitle.textColor = .secondaryLabelColor
-        nameField.stringValue = UserDefaults.standard.string(forKey: "displayName") ?? Host.current().localizedName ?? "我的 Mac"
-        nameField.placeholderString = "本机名称"
-        nameField.delegate = self
-        peerPopup.addItem(withTitle: "正在查找电脑…")
-        peerPopup.isEnabled = false
-
-        messageView.font = .systemFont(ofSize: 18)
-        messageView.isRichText = false
-        messageView.textContainerInset = NSSize(width: 12, height: 12)
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        scroll.documentView = messageView
-        scroll.heightAnchor.constraint(equalToConstant: 82).isActive = true
-        sendButton.target = self
-        sendButton.action = #selector(sendCustomMessage)
-        sendButton.bezelStyle = .rounded
-        sendButton.controlSize = .large
-        sendButton.font = .systemFont(ofSize: 17, weight: .semibold)
-        sendButton.isEnabled = false
-        sendButton.heightAnchor.constraint(equalToConstant: 46).isActive = true
-        saveButton.target = self
-        saveButton.action = #selector(saveCustomMessage)
-        saveButton.bezelStyle = .rounded
-        saveButton.controlSize = .large
-        saveButton.font = .systemFont(ofSize: 15, weight: .medium)
-        saveButton.heightAnchor.constraint(equalToConstant: 46).isActive = true
-        homeUpdateButton.target = self
-        homeUpdateButton.action = #selector(checkForUpdates)
-        homeUpdateButton.bezelStyle = .rounded
-        homeUpdateButton.controlSize = .large
-        homeLoginCheckbox.target = self
-        homeLoginCheckbox.action = #selector(toggleLoginItem(_:))
-        restartCommandField.isEditable = false
-        restartCommandField.isSelectable = true
-        restartCommandField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        restartCommandField.toolTip = "点击后可以选择并复制重启命令"
-        copyRestartButton.target = self
-        copyRestartButton.action = #selector(copyRestartCommand)
-        copyRestartButton.bezelStyle = .rounded
-        uninstallCommandField.isEditable = false
-        uninstallCommandField.isSelectable = true
-        uninstallCommandField.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        uninstallCommandField.toolTip = "点击后可以选择并复制卸载命令"
-        copyUninstallButton.target = self
-        copyUninstallButton.action = #selector(copyUninstallCommand)
-        copyUninstallButton.bezelStyle = .rounded
-        statusLabel.textColor = .secondaryLabelColor
-
-        let grid = NSGridView(views: [[label("本机名称"), nameField], [label("接收电脑"), peerPopup]])
-        grid.rowSpacing = 12
-        grid.columnSpacing = 14
-        grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 1).width = 420
-        let messageLabel = label("消息内容")
-        let buttonRow = NSStackView(views: [saveButton, sendButton])
-        buttonRow.orientation = .horizontal
-        buttonRow.distribution = .fillEqually
-        buttonRow.spacing = 12
-        let settingsLabel = label("设置")
-        let settingsRow = NSStackView(views: [homeLoginCheckbox, homeUpdateButton])
-        settingsRow.orientation = .horizontal
-        settingsRow.distribution = .fillEqually
-        settingsRow.spacing = 12
-        let restartLabel = label("重启命令")
-        let restartRow = NSStackView(views: [restartCommandField, copyRestartButton])
-        restartRow.orientation = .horizontal
-        restartRow.spacing = 10
-        restartCommandField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        copyRestartButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
-        let uninstallLabel = label("卸载命令")
-        let uninstallRow = NSStackView(views: [uninstallCommandField, copyUninstallButton])
-        uninstallRow.orientation = .horizontal
-        uninstallRow.spacing = 10
-        uninstallCommandField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        copyUninstallButton.widthAnchor.constraint(equalToConstant: 110).isActive = true
-        let stack = NSStackView(views: [title, subtitle, grid, messageLabel, scroll, buttonRow, settingsLabel, settingsRow, restartLabel, restartRow, uninstallLabel, uninstallRow, statusLabel])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 13
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.setCustomSpacing(22, after: subtitle)
-        stack.setCustomSpacing(5, after: messageLabel)
-        stack.setCustomSpacing(20, after: buttonRow)
-        stack.setCustomSpacing(5, after: settingsLabel)
-        stack.setCustomSpacing(15, after: settingsRow)
-        stack.setCustomSpacing(5, after: restartLabel)
-        stack.setCustomSpacing(12, after: restartRow)
-        stack.setCustomSpacing(5, after: uninstallLabel)
-        root.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
-            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            settingsRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            settingsRow.heightAnchor.constraint(equalToConstant: 42),
-            restartRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            restartRow.heightAnchor.constraint(equalToConstant: 34),
-            uninstallRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            uninstallRow.heightAnchor.constraint(equalToConstant: 34)
-        ])
-    }
-
-    private var localDisplayName: String { nameField.stringValue.isEmpty ? "本机" : nameField.stringValue }
-
-    private func label(_ text: String) -> NSTextField {
-        let field = NSTextField(labelWithString: text)
-        field.font = .systemFont(ofSize: 14, weight: .medium)
-        return field
+    private var configuredDisplayName: String {
+        let saved = UserDefaults.standard.string(forKey: "displayName")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let saved, !saved.isEmpty { return saved }
+        return Host.current().localizedName ?? "我的 Mac"
     }
 
     private func configureMessenger() {
-        messenger = LANMessenger(displayName: nameField.stringValue)
+        messenger = LANMessenger(displayName: configuredDisplayName)
         messenger.onPeersChanged = { [weak self] peers in self?.updatePeers(peers) }
         messenger.onMessage = { [weak self] message in
             switch message.kind {
@@ -907,20 +740,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         messenger.start()
     }
 
-    func controlTextDidEndEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField else { return }
-        guard field === nameField else { return }
-        let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        UserDefaults.standard.set(name, forKey: "displayName")
-        messenger.displayName = name
-        messenger.start()
-    }
-
     private func updatePeers(_ discoveredPeers: [Peer]) {
-        let oldIndex = peerPopup.indexOfSelectedItem - 1
-        let selectedHomeID = peers.indices.contains(oldIndex) ? peers[oldIndex].id : nil
-        let hadNoSelection = peerPopup.indexOfSelectedItem < 0 && !peers.isEmpty
         let previousIDs = Set(peers.map(\.id))
         advertisedPeers = discoveredPeers
         let peers = peerNameStore.renamed(discoveredPeers)
@@ -929,26 +749,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         selectedPopoverPeerIDs.formIntersection(onlineIDs)
         // Select newly online devices without undoing manual choices on refresh.
         selectedPopoverPeerIDs.formUnion(onlineIDs.subtracting(previousIDs))
-        peerPopup.removeAllItems()
-        if peers.isEmpty {
-            peerPopup.addItem(withTitle: "暂未发现其他电脑")
-            peerPopup.isEnabled = false
-            sendButton.isEnabled = false
-        } else {
-            peerPopup.addItem(withTitle: "所有电脑（\(peers.count) 台）")
-            peers.forEach { peerPopup.addItem(withTitle: $0.name) }
-            if let selectedHomeID {
-                if let index = peers.firstIndex(where: { $0.id == selectedHomeID }) {
-                    peerPopup.selectItem(at: index + 1)
-                } else {
-                    peerPopup.select(nil)
-                }
-            } else if hadNoSelection {
-                peerPopup.select(nil)
-            }
-            peerPopup.isEnabled = true
-            sendButton.isEnabled = true
-        }
         rebuildStatusMenu()
     }
 
@@ -987,29 +787,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
                 if failures > 0 { NSSound.beep() }
             }
         }
-    }
-
-    @objc private func sendCustomMessage() {
-        let text = messageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        let index = peerPopup.indexOfSelectedItem
-        guard !text.isEmpty else { setStatus("请先输入消息内容", success: false); return }
-        guard !peers.isEmpty, index >= 0,
-              index == 0 || peers.indices.contains(index - 1) else {
-            setStatus("请选择接收电脑", success: false)
-            return
-        }
-        let targets = index == 0 ? peers : [peers[index - 1]]
-        send(text, to: targets) { [weak self] success in
-            guard let self, success,
-                  self.messageView.string.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
-            self.messageView.string = ""
-        }
-    }
-
-    @objc private func saveCustomMessage() {
-        let text = messageView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard addCustomMessage(text) else { return }
-        setStatus("已添加到快捷列表", success: true)
     }
 
     private func addCustomMessage(_ text: String) -> Bool {
@@ -1145,16 +922,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
                       titleOverride: result, detailOverride: "全屏消息回执", responseAccepted: accepted)
     }
 
-    @objc private func showComposer() {
-        showHome()
-        window.makeFirstResponder(messageView)
-    }
-
-    @objc private func showHome() {
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-    }
-
     @objc private func toggleLoginItem(_ sender: Any) {
         guard #available(macOS 13.0, *) else { return }
         do {
@@ -1162,20 +929,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             else { try SMAppService.mainApp.register() }
         } catch { setStatus("开机启动设置失败：\(error.localizedDescription)", success: false) }
         rebuildStatusMenu()
-    }
-
-    @objc private func copyRestartCommand() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(restartCommandField.stringValue, forType: .string)
-        setStatus("重启命令已复制", success: true)
-    }
-
-    @objc private func copyUninstallCommand() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(uninstallCommandField.stringValue, forType: .string)
-        setStatus("卸载命令已复制", success: true)
     }
 
     private func enableLoginItemOnFirstInstalledLaunch() {
@@ -1308,10 +1061,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
 
     private func setStatus(_ text: String, success: Bool? = nil) {
         lastStatus = text
-        statusLabel.stringValue = text
-        statusLabel.toolTip = text
-        popoverStatusLabel.stringValue = text
-        popoverStatusLabel.toolTip = text
         updateStatusItemIcon()
         // Keep editor focus and button identity stable while sends complete.
         if statusItem.menu != nil { rebuildStatusMenu() }

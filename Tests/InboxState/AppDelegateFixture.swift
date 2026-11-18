@@ -5,7 +5,8 @@ extension AppDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: 0)
         statusItem.isVisible = false
         statusItem.menu = statusMenu
-        nameField.stringValue = "隔离测试"
+        inboxTestDefaults.set("隔离测试", forKey: "displayName")
+        inboxExpect(configuredDisplayName == "隔离测试", "Saved device name must load without a home window")
         defer {
             presentationAvailability.stop()
             NSStatusBar.system.removeStatusItem(statusItem)
@@ -42,8 +43,6 @@ extension AppDelegate {
         inboxTestDefaults.set(Data("old history".utf8), forKey: "messageHistoryV1")
         clearRetiredData()
         inboxExpect(inboxTestDefaults.object(forKey: "messageHistoryV1") == nil, "Retired history must be removed")
-        createComposerWindow()
-        window.contentView?.layoutSubtreeIfNeeded()
         func text(_ view: NSView) -> [String] {
             var result = view.subviews.flatMap(text)
             if let field = view as? NSTextField { result.append(field.stringValue) }
@@ -51,13 +50,16 @@ extension AppDelegate {
             return result
         }
         rebuildStatusPopover()
-        let labels = text(window.contentView!) + text(statusPopover.contentViewController!.view)
-        inboxExpect(!labels.contains { $0.contains("聊天") || $0.contains("会话") || $0.contains("历史") }, "Home and menu must have no retired feature controls")
-        inboxExpect(labels.contains("发送全屏消息") && labels.contains("检查更新"), "Primary features must remain available")
-        let stack = window.contentView!.subviews.first!
-        inboxExpect(stack.frame.minY >= 0, "Home content must fit after removing retired sections")
-        window.close()
-        print("功能移除：菜单与首页无聊天/历史入口，旧历史清理，界面完整显示")
+        let labels = text(statusPopover.contentViewController!.view)
+        inboxExpect(!labels.contains { $0.contains("聊天") || $0.contains("会话") || $0.contains("历史") || $0.contains("打开客户端") }, "Menu must have no retired feature controls")
+        inboxExpect(!labels.contains { $0 == "接收电脑" || $0.hasPrefix("在线电脑") || $0 == lastStatus }, "Menu must omit recipient heading, online count and status text")
+        inboxExpect(labels.contains("发送") && labels.contains("检查更新"), "Primary features must remain available")
+        inboxExpect(statusPopover.contentSize.width == 280, "Keep the compact menu width")
+        statusItem.menu = statusMenu
+        rebuildStatusMenu()
+        inboxExpect(!statusMenu.items.contains { $0.title == "打开客户端" }, "Legacy menu must not expose the removed window")
+        statusItem.menu = nil
+        print("功能移除：无客户端窗口入口、聊天或历史，菜单发送和更新保留")
     }
 }
 

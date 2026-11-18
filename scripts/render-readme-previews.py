@@ -187,7 +187,7 @@ with tempfile.TemporaryDirectory(prefix="fullscreen-readme-") as temporary:
     for path in sorted((ROOT / "Sources").glob("*.swift")):
         if path.name == "main.swift":
             continue
-        source = path.read_text().replace("UserDefaults.standard", "fixtureDefaults")
+        source = path.read_text().replace("UserDefaults.standard", "fixtureDefaults").replace("UserDefaults = .standard", "UserDefaults = fixtureDefaults")
         if path.name == "AppDelegate.swift":
             source = source.replace("import AppKit", "import AppKit\nimport Network", 1)
             start = source.index("    func applicationDidFinishLaunching(")
