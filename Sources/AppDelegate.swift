@@ -192,8 +192,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         statusPopover.delegate = self
         statusPopover.behavior = .transient
         statusPopover.animates = true
-        var width: CGFloat = 390
-        let contentWidth = width - 32
+        var width: CGFloat = 280
+        let panelInset: CGFloat = 12
+        let contentWidth = width - 2 * panelInset
         let screen = statusItem.button?.window?.screen ?? NSScreen.main
         let availableHeight = max(280, (screen?.visibleFrame.height ?? 800) - 40)
         var rowHeights: [NSLayoutConstraint] = []
@@ -366,13 +367,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         var stack = column([header, devices, shortcuts, composer, separator(), utilities], spacing: 12)
         let columnWidth = stack.widthAnchor.constraint(equalToConstant: contentWidth)
         columnWidth.isActive = true
-        var height = ceil(stack.fittingSize.height) + 32
+        var height = ceil(stack.fittingSize.height) + 2 * panelInset
         if height > availableHeight {
             // Fit the controls themselves instead of clipping a scrolling document.
             rowHeights.forEach { $0.constant = 30 }
             columns.forEach { $0.0.spacing = max(4, $0.1 - 4) }
             editorHeight.constant = 56
-            height = ceil(stack.fittingSize.height) + 32
+            height = ceil(stack.fittingSize.height) + 2 * panelInset
         }
         if height > availableHeight, (screen?.visibleFrame.width ?? 1440) >= 800 {
             // Short screens keep every section on the same panel, side by side.
@@ -389,20 +390,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
             body.distribution = .fillEqually
             body.spacing = 16
             left.widthAnchor.constraint(equalTo: right.widthAnchor).isActive = true
-            width = 2 * contentWidth + 48
+            width = 2 * contentWidth + 2 * panelInset + 16
             columnWidth.isActive = false
             stack = column([header, body], spacing: 10)
-            stack.widthAnchor.constraint(equalToConstant: width - 32).isActive = true
-            height = ceil(stack.fittingSize.height) + 32
+            stack.widthAnchor.constraint(equalToConstant: width - 2 * panelInset).isActive = true
+            height = ceil(stack.fittingSize.height) + 2 * panelInset
         }
         stack.translatesAutoresizingMaskIntoConstraints = false
         let container = PopoverBackgroundView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         container.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16)
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: panelInset),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: panelInset),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -panelInset),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -panelInset)
         ])
         let controller = NSViewController()
         controller.view = container
