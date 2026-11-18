@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var pendingAlertButton: NSButton?
     private let pendingStore = PendingMessageStore()
     private let presentationAvailability = PresentationAvailability()
-    private var sendToast: NSPanel?
+    private let sendToasts = SendToastStack()
     private var lastStatus = "正在启动…"
     private var activity: NSObjectProtocol?
     private var automaticUpdateTimer: Timer?
@@ -1016,47 +1016,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func showSendToast(message: String, recipients: String, failures: Int, titleOverride: String? = nil, detailOverride: String? = nil, responseAccepted: Bool? = nil) {
-        sendToast?.orderOut(nil)
-
         let card = SendToastView(message: message, recipients: recipients, failures: failures,
                                  titleOverride: titleOverride, detailOverride: detailOverride, responseAccepted: responseAccepted)
-        let size = card.frame.size
-        let screen = NSScreen.main ?? NSScreen.screens.first
-        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let finalOrigin = NSPoint(x: visible.maxX - size.width - 24, y: visible.maxY - size.height - 24)
-        let panel = NSPanel(contentRect: NSRect(origin: NSPoint(x: finalOrigin.x + 24, y: finalOrigin.y), size: size),
-                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.ignoresMouseEvents = true
-
-        panel.isReleasedWhenClosed = false
-        panel.contentView = card
-        card.layoutSubtreeIfNeeded()
-        panel.invalidateShadow()
-
-        sendToast = panel
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-            panel.animator().setFrameOrigin(finalOrigin)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self, weak panel] in
-            guard let panel, panel === self?.sendToast else { return }
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.25
-                panel.animator().alphaValue = 0
-            }, completionHandler: {
-                panel.orderOut(nil)
-                if self?.sendToast === panel { self?.sendToast = nil }
-            })
-        }
+        sendToasts.show(card)
     }
 
     private func setStatus(_ text: String, success: Bool? = nil) {
