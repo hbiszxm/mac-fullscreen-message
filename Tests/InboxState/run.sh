@@ -29,6 +29,7 @@ for original in sorted((project / "Sources").glob("*.swift")):
         assert text.count("messenger.send(text: text, messageID: messageID, to: peer.endpoint)") == 1
         text = text.replace("messenger.send(text: text, messageID: messageID, to: peer.endpoint)", "inboxTestSend(text: text, messageID: messageID, to: peer.endpoint)")
         text = text.replace("self.showSendToast(message: text, recipients: targetNames, failures: failures)", "inboxTestToast(message: text, recipients: targetNames, failures: failures)")
+        text = text.replace("        showSendToast(message:", "        inboxTestToast(message:")
         text += "\n" + (tests / "AppDelegateFixture.swift").read_text()
         text += "\n" + (tests / "SendingFixture.swift").read_text()
     (sources / original.name).write_text(text)

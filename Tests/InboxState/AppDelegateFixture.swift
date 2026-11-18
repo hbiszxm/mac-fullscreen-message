@@ -124,6 +124,7 @@ extension AppDelegate {
         inboxExpect(activeAlert == nil, "No-screen initialization must leave the message pending")
         inboxExpect(inboxTestSoundCount == 3, "Only successful simulated presentations should request a sound")
         runSenderAliasTests()
+        runResponseFeedbackTests()
         runSendingStateTests()
         runLiveAlertQueueTests()
         print("AppDelegate 收件箱集成：锁屏双类型角标、重复去重、解锁保留、聊天单独已读、展示不清数、挂起保留、ESC 单条处理、展示失败/无屏幕保留、持久化恢复均通过")
@@ -150,5 +151,25 @@ extension AppDelegate {
         activeAlert?.simulateEscape()
         inboxExpect(inboxTestResponses.last?.0 == message.id, "Alias presentation must retain the response message identity")
         print("备注集成：全屏展示、接收提示、新历史使用备注；待处理原始消息与回复身份保留")
+    }
+}
+
+extension AppDelegate {
+    func runResponseFeedbackTests() {
+        let peer = Peer(id: "response-peer", name: "MacBook Air", endpoint: .hostPort(host: "127.0.0.1", port: 1), instanceID: "response-device")
+        peerNameStore.setName("小刘", for: peer)
+        for accepted in [true, false] {
+            let id = UUID()
+            addHistory(id: id, direction: "发送", sender: "我", recipients: "旧备注", text: "上班", status: "已送达")
+            let response = WireMessage(id: UUID(), sender: peer.name, text: accepted ? "收到" : "拒绝", sentAt: Date(),
+                                       kind: accepted ? "accepted" : "rejected", senderInstanceID: peer.instanceID, relatedMessageID: id)
+            handleMessageResponse(response)
+            let expected = accepted ? "小刘 已收到" : "小刘 已拒绝"
+            inboxExpect(inboxTestLastToast?.title == expected && lastStatus == expected, "Receipt title and status must use local alias")
+            inboxExpect(inboxTestLastToast?.accepted == accepted, "Receipt must select its explicit accepted/rejected style")
+            inboxExpect(inboxTestLastToast?.message == "上班", "Receipt must identify the original message")
+            inboxExpect(historyStore.entries.first { $0.id == id }?.status == (accepted ? "对方已收到" : "对方已拒绝"), "Receipt must update only related history")
+        }
+        print("回执集成：本机备注、收到/拒绝样式、原消息内容和历史状态均通过")
     }
 }

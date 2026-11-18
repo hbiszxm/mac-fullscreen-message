@@ -8,7 +8,7 @@ final class SendToastView: NSView {
     override var isOpaque: Bool { false }
 
     init(message: String, recipients: String, failures: Int,
-         titleOverride: String? = nil, detailOverride: String? = nil,
+         titleOverride: String? = nil, detailOverride: String? = nil, responseAccepted: Bool? = nil,
          width: CGFloat = 360) {
         super.init(frame: .zero)
         wantsLayer = true
@@ -26,10 +26,15 @@ final class SendToastView: NSView {
         addSubview(material)
 
         let icon = NSImageView()
-        let symbol = failures == 0 ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
-        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: failures == 0 ? "发送成功" : "发送未完成")
+        let tint: NSColor = responseAccepted.map { $0 ? .systemGreen : .systemRed }
+            ?? (failures == 0 ? .systemGreen : .systemOrange)
+        let symbol = responseAccepted.map { $0 ? "checkmark.circle.fill" : "xmark.circle.fill" }
+            ?? (failures == 0 ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+        let description = responseAccepted.map { $0 ? "已收到" : "已拒绝" }
+            ?? (failures == 0 ? "发送成功" : "发送未完成")
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .medium)
-        icon.contentTintColor = failures == 0 ? .systemGreen : .systemOrange
+        icon.contentTintColor = tint
         icon.translatesAutoresizingMaskIntoConstraints = false
         addSubview(icon)
 
@@ -37,6 +42,7 @@ final class SendToastView: NSView {
         func label(_ text: String, size: CGFloat, weight: NSFont.Weight,
                    color: NSColor, lines: Int) -> NSTextField {
             let field = NSTextField(wrappingLabelWithString: text)
+            field.toolTip = text
             field.font = .systemFont(ofSize: size, weight: weight)
             field.textColor = color
             field.maximumNumberOfLines = lines
@@ -47,7 +53,7 @@ final class SendToastView: NSView {
             return field
         }
         let title = label(titleOverride ?? (failures == 0 ? "消息发送成功" : "消息发送未完成"),
-                          size: 13, weight: .semibold, color: .labelColor, lines: 1)
+                          size: 13, weight: .semibold, color: responseAccepted == nil ? .labelColor : tint, lines: 1)
         let detail = label(detailOverride ?? (failures == 0 ? "已发送给：\(recipients)" : "\(failures) 台电脑未确认收到"),
                            size: 11, weight: .regular, color: .secondaryLabelColor, lines: 1)
         let preview = message.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")

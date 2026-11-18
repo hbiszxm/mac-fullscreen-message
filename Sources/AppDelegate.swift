@@ -1469,11 +1469,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
     private func handleMessageResponse(_ message: WireMessage) {
         guard let relatedID = message.relatedMessageID else { return }
         let accepted = message.kind == "accepted"
+        let name = peerNameStore.displayName(for: message)
+        let result = "\(name) \(accepted ? "已收到" : "已拒绝")"
+        let originalText = historyStore.entries.first(where: { $0.id == relatedID })?.text ?? ""
         historyStore.update(id: relatedID, status: accepted ? "对方已收到" : "对方已拒绝")
-        setStatus(accepted ? "\(peerNameStore.displayName(for: message)) 已确认收到" : "\(peerNameStore.displayName(for: message)) 已拒绝消息", success: accepted)
-        showSendToast(message: accepted ? "对方已确认收到" : "对方已拒绝", recipients: peerNameStore.displayName(for: message), failures: accepted ? 0 : 1,
-                      titleOverride: accepted ? "对方已收到" : "对方已拒绝",
-                      detailOverride: "来自：\(peerNameStore.displayName(for: message))")
+        setStatus(result, success: accepted)
+        showSendToast(message: originalText, recipients: name, failures: 0,
+                      titleOverride: result, detailOverride: "全屏消息回执", responseAccepted: accepted)
     }
 
     @objc private func showComposer() {
@@ -1593,11 +1595,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, N
         alert.runModal()
     }
 
-    private func showSendToast(message: String, recipients: String, failures: Int, titleOverride: String? = nil, detailOverride: String? = nil) {
+    private func showSendToast(message: String, recipients: String, failures: Int, titleOverride: String? = nil, detailOverride: String? = nil, responseAccepted: Bool? = nil) {
         sendToast?.orderOut(nil)
 
         let card = SendToastView(message: message, recipients: recipients, failures: failures,
-                                 titleOverride: titleOverride, detailOverride: detailOverride)
+                                 titleOverride: titleOverride, detailOverride: detailOverride, responseAccepted: responseAccepted)
         let size = card.frame.size
         let screen = NSScreen.main ?? NSScreen.screens.first
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)

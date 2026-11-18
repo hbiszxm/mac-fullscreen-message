@@ -92,4 +92,8 @@ func inboxTestSend(text: String, messageID: UUID, to endpoint: NWEndpoint,
                    completion: @escaping (Result<Void, Error>) -> Void) {
     inboxTestSends.append(InboxTestSend(text: text, id: messageID, endpoint: endpoint, completion: completion))
 }
-func inboxTestToast(message: String, recipients: String, failures: Int) {}
+var inboxTestLastToast: (message: String, recipients: String, title: String?, accepted: Bool?)?
+func inboxTestToast(message: String, recipients: String, failures: Int,
+                    titleOverride: String? = nil, detailOverride: String? = nil, responseAccepted: Bool? = nil) {
+    inboxTestLastToast = (message, recipients, titleOverride, responseAccepted)
+}
