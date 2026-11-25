@@ -3,3 +3,6 @@ build/
 *.pkg
 *.zip
 
+
+Server/private/
+Server/__pycache__/

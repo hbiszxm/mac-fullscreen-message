@@ -3,7 +3,15 @@ set -euo pipefail
 
 REPO="hbiszxm/mac-fullscreen-message"
 PKG_NAME="FullscreenMessage-AppleSilicon.pkg"
-DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$PKG_NAME?cache=$(date +%s)"
+RELEASE_PATH="latest/download"
+if [ -n "${FULLSCREEN_VERSION:-}" ]; then
+  if [[ ! "$FULLSCREEN_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "版本号格式无效，例如 v3.18.0" >&2
+    exit 1
+  fi
+  RELEASE_PATH="download/$FULLSCREEN_VERSION"
+fi
+DOWNLOAD_URL="https://github.com/$REPO/releases/$RELEASE_PATH/$PKG_NAME?cache=$(date +%s)"
 WORK_DIR="$(mktemp -d /private/tmp/fullscreen-message-install.XXXXXX)"
 PKG_PATH="$WORK_DIR/$PKG_NAME"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -13,7 +21,7 @@ if [ "$(uname -m)" != "arm64" ]; then
   exit 1
 fi
 
-echo "正在下载全屏消息最新版…"
+echo "正在下载全屏消息 ${FULLSCREEN_VERSION:-最新版}…"
 curl --fail --location --progress-bar "$DOWNLOAD_URL" --output "$PKG_PATH"
 echo "正在安装，需要输入当前 Mac 的登录密码…"
 sudo /usr/sbin/installer -pkg "$PKG_PATH" -target /

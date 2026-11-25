@@ -106,7 +106,7 @@ let defaults = UserDefaults(suiteName: suiteName)!
 defer { defaults.removePersistentDomain(forName: suiteName) }
 let inbox = PendingMessageStore(defaults: defaults)
 let receiverName = "UnreadTest-\(testID.prefix(8))"
-let receiver = LANMessenger(displayName: receiverName)
+let receiver = LANMessenger(displayName: receiverName, cloudEnabled: false, defaults: defaults)
 var deliveryCounts: [UUID: Int] = [:]
 receiver.onMessage = { message in
     // Deliberately create no window: lock screen or failed presentation must
@@ -166,7 +166,7 @@ expect(restored.messages.map(\.id) == [secondAlert.id], "Handling one alert must
 print("本机未读交付：持久化先于 OK、重复包去重、未展示全屏保留、拒绝旧聊天和重启恢复均通过")
 
 // Exercise the shipping send API with overlapping identical-text messages.
-let sender = LANMessenger(displayName: "IsolatedSender")
+let sender = LANMessenger(displayName: "IsolatedSender", cloudEnabled: false, defaults: defaults)
 let burstIDs = (0..<12).map { _ in UUID() }
 var completions = 0
 var sendErrors: [String] = []

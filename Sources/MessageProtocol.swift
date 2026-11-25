@@ -40,6 +40,12 @@ enum MessageError: LocalizedError {
 final class LANMessenger {
     static let serviceType = "_fullscreenmsg._tcp"
     private let queue = DispatchQueue(label: "cn.local.fullscreen-message.network")
+    private var cloud: CloudRelay?
+    private let cloudEnabled: Bool
+    private let localEnabled: Bool
+    private let defaults: UserDefaults
+    private var lanPeers: [Peer] = []
+    private var cloudPeers: [Peer] = []
     private var listener: NWListener?
     private var browser: NWBrowser?
     private var seenMessageIDs: Set<UUID> = []
@@ -53,19 +59,24 @@ final class LANMessenger {
     var onMessage: ((WireMessage) -> Void)?
     var onStatus: ((String) -> Void)?
 
-    init(displayName: String) {
+    init(displayName: String, cloudEnabled: Bool = true, localEnabled: Bool = true, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.localEnabled = localEnabled
+        self.cloudEnabled = cloudEnabled
         self.displayName = displayName
-        if let saved = UserDefaults.standard.string(forKey: "instanceID") {
+        if let saved = defaults.string(forKey: "instanceID") {
             instanceID = saved
         } else {
             let created = String(UUID().uuidString.prefix(8))
-            UserDefaults.standard.set(created, forKey: "instanceID")
+            defaults.set(created, forKey: "instanceID")
             instanceID = created
         }
     }
 
     func start() {
         stop()
+        if cloudEnabled { startCloud() }
+        guard localEnabled else { return }
         do {
             let listener = try NWListener(using: .tcp)
             listener.service = NWListener.Service(name: serviceName, type: Self.serviceType)
@@ -93,17 +104,11 @@ final class LANMessenger {
             let ownName = self.serviceName
             let discoveredPeers = results.compactMap { result -> Peer? in
                 guard case let .service(name, _, _, _) = result.endpoint, name != ownName else { return nil }
-                return Peer(id: String(describing: result.endpoint), name: self.visibleName(from: name), endpoint: result.endpoint, instanceID: self.instanceID(from: name))
+                return Peer(id: self.instanceID(from: name).map { "device:\($0)" } ?? String(describing: result.endpoint), name: self.visibleName(from: name), endpoint: result.endpoint, instanceID: self.instanceID(from: name))
             }
-            let currentIDs = Set(discoveredPeers.map(\.id))
-            let wentOffline = self.advertisedPeerIDs.subtracting(currentIDs)
-            self.dismissedPeerIDs.subtract(wentOffline)
-            self.advertisedPeerIDs = currentIDs
-            let newPeers = discoveredPeers
-                .filter { !self.dismissedPeerIDs.contains($0.id) }
-                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            self.peers = newPeers
-            DispatchQueue.main.async { self.onPeersChanged?(newPeers) }
+            self.lanPeers = discoveredPeers
+            self.publishPeers()
+
         }
         browser.stateUpdateHandler = { [weak self] state in
             if case .failed(let error) = state {
@@ -112,6 +117,54 @@ final class LANMessenger {
         }
         browser.start(queue: queue)
         self.browser = browser
+    }
+
+    private func startCloud() {
+        let key: String
+        if let saved = defaults.string(forKey: "cloudDeviceKeyV1") { key = saved }
+        else {
+            key = UUID().uuidString + UUID().uuidString
+            defaults.set(key, forKey: "cloudDeviceKeyV1")
+        }
+        let relay = CloudRelay(id: instanceID, name: displayName, key: key)
+        cloud = relay
+        relay.onPeersChanged = { [weak self, weak relay] peers in
+            guard let self, relay === self.cloud else { return }
+            self.queue.async { self.cloudPeers = peers; self.publishPeers() }
+        }
+        relay.onStatus = { [weak self, weak relay] text in
+            guard let self, relay === self.cloud else { return }
+            self.onStatus?(text)
+        }
+        relay.onMessage = { [weak self, weak relay] message in
+            guard let self, relay === self.cloud else { return false }
+            return self.deliver(message)
+        }
+        relay.start()
+    }
+
+    private func publishPeers() {
+        var merged = Dictionary(lanPeers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for peer in cloudPeers { merged[peer.id] = peer }
+        let ids = Set(merged.keys)
+        dismissedPeerIDs.subtract(advertisedPeerIDs.subtracting(ids))
+        advertisedPeerIDs = ids
+        let visible = merged.values.filter { !dismissedPeerIDs.contains($0.id) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        DispatchQueue.main.async { [weak self] in
+            self?.peers = visible
+            self?.onPeersChanged?(visible)
+        }
+    }
+
+    private func deliver(_ message: WireMessage) -> Bool {
+        guard message.kind == nil || ["alert", "accepted", "rejected"].contains(message.kind!) else { return false }
+        if seenMessageIDs.contains(message.id) { return true }
+        guard let onMessage else { return false }
+        onMessage(message)
+        if seenMessageIDs.count >= 500 { seenMessageIDs.removeAll(keepingCapacity: true) }
+        seenMessageIDs.insert(message.id)
+        return true
     }
 
     private var serviceName: String { "\(displayName)〔\(instanceID)〕" }
@@ -128,21 +181,22 @@ final class LANMessenger {
     }
 
     func stop() {
+        cloud?.stop(); cloud = nil
         listener?.cancel()
         browser?.cancel()
         listener = nil
         browser = nil
         peers = []
-        advertisedPeerIDs = []
-        dismissedPeerIDs = []
+        queue.async {
+            self.lanPeers = []; self.cloudPeers = []
+            self.advertisedPeerIDs = []; self.dismissedPeerIDs = []
+        }
     }
 
     func dismissPeer(id: String) {
         queue.async {
             self.dismissedPeerIDs.insert(id)
-            let visiblePeers = self.peers.filter { $0.id != id }
-            self.peers = visiblePeers
-            DispatchQueue.main.async { self.onPeersChanged?(visiblePeers) }
+            self.publishPeers()
         }
     }
 
@@ -158,6 +212,21 @@ final class LANMessenger {
         var packet = Data(bytes: &length, count: 4)
         packet.append(body)
 
+        if case let .service(target, type, _, _) = endpoint, type == CloudRelay.endpointType {
+            let relay = cloud
+            guard let relay else { completion(.failure(MessageError.connectionFailed("云网络尚未连接"))); return }
+            relay.send(message, to: target) { [weak self] result in
+                guard let self else { return }
+                if case .failure = result {
+                    self.queue.async {
+                        if let local = self.lanPeers.first(where: { $0.instanceID == target }) {
+                            self.sendPacket(packet, to: local.endpoint, attempt: 1, completion: completion)
+                        } else { DispatchQueue.main.async { completion(result) } }
+                    }
+                } else { completion(result) }
+            }
+            return
+        }
         sendPacket(packet, to: endpoint, attempt: 1, completion: completion)
     }
 
@@ -228,12 +297,7 @@ final class LANMessenger {
                     DispatchQueue.main.async {
                         // The receiver persists unread messages synchronously. Confirm delivery
                         // only after that handler returns, including when a retry arrives first.
-                        if !self.seenMessageIDs.contains(message.id) {
-                            guard let onMessage = self.onMessage else { connection.cancel(); return }
-                            onMessage(message)
-                            if self.seenMessageIDs.count >= 500 { self.seenMessageIDs.removeAll(keepingCapacity: true) }
-                            self.seenMessageIDs.insert(message.id)
-                        }
+                        guard self.deliver(message) else { connection.cancel(); return }
                         connection.send(content: Data("OK".utf8), completion: .contentProcessed { _ in connection.cancel() })
                     }
                 }

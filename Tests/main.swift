@@ -1,7 +1,16 @@
 import Foundation
 
-let receiver = LANMessenger(displayName: "可靠性测试接收端")
-let sender = LANMessenger(displayName: "可靠性测试发送端")
+let receiverSuite = "cn.local.fullscreen-message.test.receiver." + UUID().uuidString
+let senderSuite = "cn.local.fullscreen-message.test.sender." + UUID().uuidString
+let receiverDefaults = UserDefaults(suiteName: receiverSuite)!
+let senderDefaults = UserDefaults(suiteName: senderSuite)!
+defer {
+    receiverDefaults.removePersistentDomain(forName: receiverSuite)
+    senderDefaults.removePersistentDomain(forName: senderSuite)
+}
+
+let receiver = LANMessenger(displayName: "可靠性测试接收端", cloudEnabled: false, defaults: receiverDefaults)
+let sender = LANMessenger(displayName: "可靠性测试发送端", cloudEnabled: false, defaults: senderDefaults)
 var receivedText: String?
 var receivedKind: String?
 var sendResult: Result<Void, Error>?

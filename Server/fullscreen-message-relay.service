@@ -1,0 +1,19 @@
+[Unit]
+Description=Fullscreen Message TLS Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/zxm-xiangm/全屏信息服务
+ExecStart=/usr/bin/python3 -u /root/zxm-xiangm/全屏信息服务/relay.py
+Restart=always
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
