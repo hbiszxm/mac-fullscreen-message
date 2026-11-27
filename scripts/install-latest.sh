@@ -22,7 +22,9 @@ if [ "$(uname -m)" != "arm64" ]; then
 fi
 
 echo "正在下载全屏消息 ${FULLSCREEN_VERSION:-最新版}…"
-curl --fail --location --progress-bar "$DOWNLOAD_URL" --output "$PKG_PATH"
+/usr/bin/curl --http1.1 --fail --location --progress-bar \
+  --connect-timeout 15 --max-time 180 --retry 3 --retry-all-errors --retry-delay 2 \
+  "$DOWNLOAD_URL" --output "$PKG_PATH"
 echo "正在安装，需要输入当前 Mac 的登录密码…"
 sudo /usr/sbin/installer -pkg "$PKG_PATH" -target /
 echo "安装或升级完成。"
