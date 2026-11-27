@@ -22,10 +22,10 @@
 
 ## 云网络测试版安装
 
-V3.18.0 目前作为测试版提供，需要双方电脑安装；稳定版自动更新通道保持原版本。可从 [测试版页面](https://github.com/hbiszxm/mac-fullscreen-message/releases/tag/v3.18.0) 下载安装包，或在终端执行：
+V3.18.1 目前作为测试版提供，需要双方电脑安装；稳定版自动更新通道保持原版本。可从 [测试版页面](https://github.com/hbiszxm/mac-fullscreen-message/releases/tag/v3.18.1) 下载安装包，或在终端执行：
 
 ```bash
-curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/download/v3.18.0/install-latest.sh" | FULLSCREEN_VERSION=v3.18.0 /bin/bash
+curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/download/v3.18.1/install-latest.sh" | FULLSCREEN_VERSION=v3.18.1 /bin/bash
 ```
 
 ## 稳定版命令行安装
@@ -90,12 +90,14 @@ curl -fsSL "https://github.com/hbiszxm/mac-fullscreen-message/releases/latest/do
 构建产物位于 `build/`：
 
 - `全屏消息.app`
-- `全屏消息-Apple芯片-v3.18.0.pkg`
+- `全屏消息-Apple芯片-v3.18.1.pkg`
 
 ## 云端测试服务
 
-客户端 V3.18.0 起默认连接 `18.0.2.83:18443`，不需要手动配置。所有连接该服务的新版客户端属于同一设备列表。双方都需要升级；旧版仍可在同一局域网内使用。
+客户端 V3.18.1 起默认连接 `18.0.2.83:18443`，不需要手动配置。所有连接该服务的新版客户端属于同一设备列表。双方都需要升级；旧版仍可在同一局域网内使用。
 
 云端使用 TLS 和固定服务器证书校验，每台设备自动保存独立身份凭据。在线连接有心跳检测，异常断网约 35 秒内移出云端列表；服务端只有收到接收客户端的确认后才返回送达。当前只转发在线消息，不提供离线消息存储，消息正文不写入服务器日志。
 
 部署目录、服务管理及验证说明见 [服务端文档](Server/README.md)。
+
+V3.18.1 在云连接失败时依次尝试系统路径及可用的 Wi-Fi／有线网卡直连，仍严格校验证书，不修改全局代理设置。安装脚本使用 HTTP/1.1 并自动重试下载。

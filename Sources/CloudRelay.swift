@@ -25,6 +25,10 @@ final class CloudRelay {
     private let queue = DispatchQueue(label: "cn.local.fullscreen-message.cloud")
     private let id: String, name: String, key: String
     private let host: String, port: UInt16, pin: String
+    private let pathMonitor = NWPathMonitor()
+    private var directInterfaces: [NWInterface] = []
+    private var routeIndex = 0
+    private var monitoring = false
     private var connection: NWConnection?
     private var generation = 0
     private var stopped = true
@@ -41,7 +45,20 @@ final class CloudRelay {
         self.id = id; self.name = String(name.prefix(120)); self.key = key
         self.host = host; self.port = port; self.pin = pin
     }
-    func start() { queue.async { self.stopped = false; self.connect() } }
+    func start() {
+        queue.async { [self] in
+            if !self.monitoring {
+                self.monitoring = true
+                self.pathMonitor.pathUpdateHandler = { [weak self] path in
+                    self?.directInterfaces = path.availableInterfaces.filter { $0.type == .wifi || $0.type == .wiredEthernet }
+                }
+                self.pathMonitor.start(queue: self.queue)
+            }
+            self.stopped = false
+            self.connect()
+        }
+    }
+    deinit { pathMonitor.cancel() }
     func stop() {
         queue.async {
             self.stopped = true
@@ -70,7 +87,12 @@ final class CloudRelay {
             certificateVerified = SecTrustEvaluateWithError(reference, nil)
             done(certificateVerified)
         }, queue)
-        let conn = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: NWParameters(tls: tls))
+        let parameters = NWParameters(tls: tls)
+        if routeIndex > 0, directInterfaces.indices.contains(routeIndex - 1) {
+            parameters.requiredInterface = directInterfaces[routeIndex - 1]
+            parameters.preferNoProxies = true
+        }
+        let conn = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: parameters)
         connection = conn
         conn.stateUpdateHandler = { [weak self, weak conn] state in
             guard let self, let conn, conn === self.connection, ticket == self.generation else { return }
@@ -110,6 +132,7 @@ final class CloudRelay {
             callbacks.forEach { $0(.failure(MessageError.connectionFailed(reason))) }
         }
         guard reconnect, !stopped else { return }
+        routeIndex = (routeIndex + 1) % (directInterfaces.count + 1)
         let delay = min(30.0, pow(2, Double(min(retry, 5))))
         retry += 1
         queue.asyncAfter(deadline: .now() + delay) { [weak self] in
